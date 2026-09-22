@@ -63,7 +63,7 @@ if id "${USER_NAME}" >/dev/null 2>&1; then
     echo 'Utilisateur déjà présent, on conserve.'
 else
     useradd -m -s /bin/bash "${USER_NAME}"
-echo "${USER_NAME}:password" | chpasswd
+    echo "${USER_NAME}:password" | chpasswd
 fi
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null
