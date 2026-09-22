@@ -502,3 +502,19 @@ echo "Pour lancer opencode dans le projet :"
 echo "  cd ${OPENMONTAGE_DIR} && opencode"
 echo
 echo "Garde tes secrets hors de tout commit — .env est gitignoré."
+
+# ────────────────────────────────────────────────────────────────────────
+#  Sauvegarde de l'état pour reprise ultérieure
+# ────────────────────────────────────────────────────────────────────────
+cat > "${HOME}/.openmontage_resume_state" << EOF
+STEP1=${STEP1:-done}
+STEP2=${STEP2:-done}
+STEP3=${STEP3:-done}
+STEP4=${STEP4:-done}
+STEP5=${STEP5:-done}
+STEP6=${STEP6:-done}
+EOF
+
+echo ""
+echo "💾 État sauvegardé dans ${HOME}/.openmontage_resume_state"
+echo "Pour reprendre un setup interrompu: ./setup_ubuntu.sh"
