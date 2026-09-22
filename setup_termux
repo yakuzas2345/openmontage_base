@@ -31,17 +31,17 @@ fi
 # --- Version de la distribution (optionnelle) ---
 DISTRO="${1:-ubuntu}"   # "ubuntu" = dernière LTS ; ex. "ubuntu:24.04" pour forcer
 
-if [ -z "${TERMUX_VERSION:-}" ]; then
-    echo
-    echo "⛔ Environnement Termux non détecté (TERMUX_VERSION absent)." >&2
-    echo "   Ce script doit être lancé dans Termux sur Android." >&2
-    exit 1
-fi
-
+if command -v pkg >/dev/null 2>&1; then
+    STEP1="done"
+else
 step "1/6 — Mise à jour Termux (pkg update puis pkg upgrade)"
 pkg update -y
 pkg upgrade -y
 
+fi
+if [ -d "${HOME}/storage/shared/openmontage" ]; then
+    STEP2="done"
+else
 step "2/6 — Accès stockage + dossier openmontage"
 termux-setup-storage
 sleep 2
@@ -49,6 +49,10 @@ STORAGE_DIR="${HOME}/storage/shared/openmontage"   # = /storage/emulated/0/openm
 mkdir -p "${STORAGE_DIR}/previews" "${STORAGE_DIR}/final" "${STORAGE_DIR}/storyboard"
 ls -la "${STORAGE_DIR}"
 
+fi
+if command -v proot-distro >/dev/null 2>&1; then
+    STEP3="done"
+else
 step "3/6 — proot-distro + installation de '${DISTRO}'"
 pkg install -y proot-distro
 proot-distro install "${DISTRO}"
@@ -63,6 +67,10 @@ if [[ ! -d "${ROOTFS}" ]]; then
 fi
 echo "Rootfs du conteneur : ${ROOTFS}"
 
+fi
+if id "${USER_NAME}" >/dev/null 2>&1; then
+    STEP4="done"
+else
 step "4/6 — Utilisateur '${USER_NAME}' avec sudo (NOPASSWD)"
 cat > "${ROOTFS}/tmp/setup_user.sh" <<'USERSCRIPT'
 set -e
@@ -81,7 +89,11 @@ chmod 440 /etc/sudoers.d/${USER_NAME}
 echo 'OK — sudo NOPASSWD + password défini'
 USERSCRIPT
 proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash /tmp/setup_user.sh
+fi
 
+if [ -d "${HOME}/openmontage" ] && [ -f "${HOME}/openmontage/.git/HEAD" ]; then
+    STEP5="done"
+else
 step "5/6 — Installation opencode + OpenMontage dans le PRoot (setup_ubuntu.sh adapté)"
 cat > "${ROOTFS}/tmp/setup_ubuntu_pr.sh" <<'PR_UBUNTU_SCRIPT'
 #!/usr/bin/env bash
@@ -589,7 +601,11 @@ proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash /tmp/setup_ubuntu_p
     exit 1
 }
 rm -f "${ROOTFS}/tmp/setup_ubuntu_pr.sh"
+fi
 
+if grep -q "alias openmontage=" "${HOME}/.bashrc" 2>/dev/null; then
+    STEP6="done"
+else
 step "6/6 — Alias openmontage (Termux + Ubuntu)"
 
 # Alias au niveau Termux
@@ -641,3 +657,18 @@ proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash -c '
     export PATH="$HOME/.opencode/bin:$PATH"
     cd ~/openmontage && opencode ; bash
 '
+fi
+
+# Sauvegarder l'état pour reprise ultérieure
+cat > "${HOME}/.openmontage_resume_state" << EOF
+STEP1=${STEP1:-todo}
+STEP2=${STEP2:-todo}
+STEP3=${STEP3:-todo}
+STEP4=${STEP4:-todo}
+STEP5=${STEP5:-todo}
+STEP6=${STEP6:-todo}
+EOF
+
+echo ""
+echo "💾 État sauvegardé dans ${HOME}/.openmontage_resume_state"
+echo "Pour reprendre: ./setup_termux"
