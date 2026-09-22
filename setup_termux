@@ -31,6 +31,13 @@ fi
 # --- Version de la distribution (optionnelle) ---
 DISTRO="${1:-ubuntu}"   # "ubuntu" = dernière LTS ; ex. "ubuntu:24.04" pour forcer
 
+if [ -z "${TERMUX_VERSION:-}" ]; then
+    echo
+    echo "⛔ Environnement Termux non détecté (TERMUX_VERSION absent)." >&2
+    echo "   Ce script doit être lancé dans Termux sur Android." >&2
+    exit 1
+fi
+
 step "1/6 — Mise à jour Termux (pkg update puis pkg upgrade)"
 pkg update -y
 pkg upgrade -y
