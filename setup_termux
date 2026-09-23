@@ -89,7 +89,8 @@ check_network || {
 pkg update -y
 pkg upgrade -y
 # coreutils (sleep/yes/...) absent du bootstrap minimal — requis dès l'étape 2 (sleep 2)
-pkg install -y coreutils
+# lesspipe : filtre d'entrée pour less (sinon "program lesspipe is not installed" en sortie)
+pkg install -y coreutils lesspipe
 STEP1="done"
 if [ -d "${HOME}/storage/shared/openmontage" ]; then
     STEP2="done"
