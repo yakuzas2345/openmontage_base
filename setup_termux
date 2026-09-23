@@ -767,9 +767,21 @@ if confirm "Lancer 'make install-dev' (outils de test pytest) ?"; then
 fi
 log "Setup OpenMontage terminé."
 
-# Pousse la branche de setup vers le repo des storyboards (origin_<branche> / openmontage_story)
+# Pousse la branche de setup vers le repo des storyboards (origin_<branche> / openmontage_story).
+# Raison : crée la branche distante + l'upstream ET valide que la Deploy key
+# 'story' a bien le droit write — mieux vaut le découvrir à l'install qu'au push final.
+# En reprise, si tout est déjà synchronisé, on ne demande rien.
 BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo main)"
-if confirm "Pousser la branche '${BRANCH}' sur openmontage_story (origin_${BRANCH}) ?"; then
+_needs_push=true
+if git rev-parse --verify "@{upstream}" >/dev/null 2>&1; then
+  _ahead="$(git rev-list --count "@{upstream}..HEAD" 2>/dev/null || echo 1)"
+  _behind="$(git rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 1)"
+  if [ "${_ahead}" = 0 ] && [ "${_behind}" = 0 ]; then
+    _needs_push=false
+    log "Branche '${BRANCH}' déjà à jour sur openmontage_story — push ignoré."
+  fi
+fi
+if ${_needs_push} && confirm "Pousser la branche '${BRANCH}' sur openmontage_story (origin_${BRANCH}) ?"; then
   if git push -u origin_${BRANCH} "${BRANCH}" 2>&1; then
     log "Branche '${BRANCH}' poussée et suivie (upstream = origin_${BRANCH}/${BRANCH})."
   else
