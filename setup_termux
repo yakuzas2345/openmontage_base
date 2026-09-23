@@ -134,10 +134,11 @@ if proot-distro login "${DISTRO}" -- id "${USER_NAME}" >/dev/null 2>&1; then
     STEP4="done"
 else
 step "4/6 — Utilisateur '${USER_NAME}' avec sudo (NOPASSWD)"
-# Si le conteneur a déjà UN utilisateur avec /home, c'est lui (cohérence en reprise)
+# Si le conteneur a déjà UN utilisateur avec /home (hors compte stock `ubuntu`
+# livré avec l'image), c'est lui (cohérence en reprise)
 if [ -d "${ROOTFS}/home" ]; then
   _cu="$(ls "${ROOTFS}/home" 2>/dev/null || true)"
-  if [ -n "${_cu}" ] && [ "$(printf '%s\n' "${_cu}" | wc -l)" -eq 1 ]; then
+  if [ -n "${_cu}" ] && [ "$(printf '%s\n' "${_cu}" | wc -l)" -eq 1 ] && [ "${_cu}" != "ubuntu" ]; then
     USER_NAME="${_cu}"
     log "Utilisateur existant dans le conteneur : '${USER_NAME}'."
   fi
