@@ -86,6 +86,16 @@ check_network || {
     echo "❌ Pas de réseau. Arrêt." >&2
     exit 1
 }
+# Prompts apt en 'N' automatiques (conflits de fichiers config : on garde les
+# versions locales sans demander). Persiste dans apt.conf.d, idempotent.
+if [ -n "${PREFIX:-}" ]; then
+  mkdir -p "${PREFIX}/etc/apt/apt.conf.d"
+  cat > "${PREFIX}/etc/apt/apt.conf.d/99openmontage-auto" <<'APT'
+Dpkg::Options { "--force-confdef"; "--force-confold"; };
+APT
+  export DEBIAN_FRONTEND=noninteractive
+  log "Prompts apt automatisés (keep configs locales)."
+fi
 pkg update -y
 pkg upgrade -y
 # coreutils (sleep/yes/...) absent du bootstrap minimal — requis dès l'étape 2 (sleep 2)
@@ -886,11 +896,12 @@ step "6/6 — Alias openmontage (Termux + Ubuntu)"
 # Alias au niveau Termux : remplacé à chaque run pour propager les corrections.
 # PATH exporté inline car `bash -c` ne lit pas ~/.bashrc.
 TERMUX_BASHRC="${HOME}/.bashrc"
-sed -i '/^alias openmontage=/d; /^alias '"${USER_NAME}"'=/d; /# openmontage — ajout automatique par setup_termux/d' "${TERMUX_BASHRC}" 2>/dev/null || true
+sed -i '/^alias openmontage=/d; /^alias openmontage-update=/d; /^alias '"${USER_NAME}"'=/d; /# openmontage — ajout automatique par setup_termux/d' "${TERMUX_BASHRC}" 2>/dev/null || true
 cat >> "${TERMUX_BASHRC}" <<EOF
 
 # openmontage — ajout automatique par setup_termux
 alias ${USER_NAME}="proot-distro login ${DISTRO} --user ${USER_NAME}"
+alias openmontage-update="bash ${HOME}/setup_termux"
 alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'export PATH=\"/usr/local/bin:\$HOME/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; cd /home/${USER_NAME}/openmontage && opencode; [ -t 0 ] && stty sane 2>/dev/null; bash'"
 EOF
 echo "  Alias '${USER_NAME}' et 'openmontage' (re)écrits dans ~/.bashrc (Termux)."
