@@ -70,19 +70,16 @@ check_network() {
     return 1
 }
 
-if command -v pkg >/dev/null 2>&1; then
-    STEP1="done"
-else
 step "1/6 — Mise à jour Termux (pkg update puis pkg upgrade)"
-pkg update -y
-pkg upgrade -y
-# Vérif réseau après upgrade
+# Toujours mettre à jour (pkg existe toujours sur Termux — le tester ne sert à rien).
+# Vérif réseau AVANT toute opération (problèmes 27-29).
 check_network || {
-    echo "❌ Pas de réseau après upgrade Termux. Arrêt." >&2
+    echo "❌ Pas de réseau. Arrêt." >&2
     exit 1
 }
-
-fi
+pkg update -y
+pkg upgrade -y
+STEP1="done"
 if [ -d "${HOME}/storage/shared/openmontage" ]; then
     STEP2="done"
 else
