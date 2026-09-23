@@ -30,6 +30,7 @@ set -e
 
 # --- Helpers ---
 step() { echo; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; echo "▶ $1"; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
+log()  { echo "  · $1"; }
 
 # --- Nom de l'utilisateur : détection automatique ---
 USER_NAME="${USER:-}"
