@@ -95,7 +95,6 @@ if [ -n "${PREFIX:-}" ]; then
 Dpkg::Options { "--force-confdef"; "--force-confold"; };
 APT
   export DEBIAN_FRONTEND=noninteractive
-  log "Prompts apt automatisés (keep configs locales)."
 fi
 pkg update -y
 pkg upgrade -y
