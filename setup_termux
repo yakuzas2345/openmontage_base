@@ -44,6 +44,15 @@ fi
 # --- Version de la distribution (optionnelle) ---
 DISTRO="${1:-ubuntu}"   # "ubuntu" = dernière LTS ; ex. "ubuntu:24.04" pour forcer
 
+# --- Chemins recalculés à CHAQUE lancement (pas seulement à l'install) ---
+# L'étape 3 est skippée en reprise : ROOTFS/CONTAINER_DIR y seraient vides (étapes 4-6 cassées).
+STORAGE_DIR="${HOME}/storage/shared/openmontage"   # = /storage/emulated/0/openmontage
+resolve_rootfs() {
+    CONTAINER_DIR="$(ls -dt "$PREFIX"/var/lib/proot-distro/containers/*/ 2>/dev/null | head -n1)"
+    ROOTFS="${CONTAINER_DIR}rootfs"
+}
+resolve_rootfs
+
 # Test environnement Termux (problème TERMUX)
 if [ -z "${TERMUX_VERSION:-}" ]; then
     echo
@@ -88,7 +97,6 @@ else
 step "2/6 — Accès stockage + dossier openmontage"
 termux-setup-storage
 sleep 2
-STORAGE_DIR="${HOME}/storage/shared/openmontage"   # = /storage/emulated/0/openmontage
 mkdir -p "${STORAGE_DIR}/previews" "${STORAGE_DIR}/final" "${STORAGE_DIR}/storyboard"
 ls -la "${STORAGE_DIR}"
 
@@ -102,8 +110,7 @@ proot-distro install "${DISTRO}"
 echo "==> Version installée dans le conteneur :"
 proot-distro login "${DISTRO}" -- sh -c "grep VERSION= /etc/os-release; grep VERSION_CODENAME /etc/os-release; command -v apt-get >/dev/null || echo 'FAIL: apt-get introuvable'"
 
-CONTAINER_DIR="$(ls -dt "$PREFIX"/var/lib/proot-distro/containers/*/ 2>/dev/null | head -n1)"
-ROOTFS="${CONTAINER_DIR}rootfs"
+resolve_rootfs   # recalcule CONTAINER_DIR/ROOTFS après install
 if [[ ! -d "${ROOTFS}" ]]; then
     echo "ERREUR: rootfs du conteneur introuvable (${ROOTFS})." >&2
     exit 1
