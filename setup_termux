@@ -79,6 +79,8 @@ check_network || {
 }
 pkg update -y
 pkg upgrade -y
+# coreutils (sleep/yes/...) absent du bootstrap minimal — requis dès l'étape 2 (sleep 2)
+pkg install -y coreutils
 STEP1="done"
 if [ -d "${HOME}/storage/shared/openmontage" ]; then
     STEP2="done"
@@ -109,11 +111,13 @@ fi
 echo "Rootfs du conteneur : ${ROOTFS}"
 
 fi
-if id "${USER_NAME}" >/dev/null 2>&1; then
+# Vérifier DANS le conteneur : `id` côté Termux ne voit pas les users du conteneur
+if proot-distro login "${DISTRO}" -- id "${USER_NAME}" >/dev/null 2>&1; then
     STEP4="done"
 else
 step "4/6 — Utilisateur '${USER_NAME}' avec sudo (NOPASSWD)"
-cat > "${ROOTFS}/tmp/setup_user.sh" <<'USERSCRIPT'
+# Heredoc NON quoté : ${USER_NAME} est expansé côté Termux lors de l'écriture du fichier
+cat > "${ROOTFS}/tmp/setup_user.sh" <<USERSCRIPT
 set -e
 if id "${USER_NAME}" >/dev/null 2>&1; then
     echo 'Utilisateur déjà présent, on conserve.'
@@ -129,7 +133,8 @@ chmod 440 /etc/sudoers.d/${USER_NAME}
 [ -f /etc/sudoers.d/${USER_NAME} ] && printf '\n' >> /etc/sudoers.d/${USER_NAME}
 echo 'OK — sudo NOPASSWD + password défini'
 USERSCRIPT
-proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash /tmp/setup_user.sh
+# Login ROOT : l'utilisateur n'existe pas encore, `--user` échouerait ("no user defined")
+proot-distro login "${DISTRO}" -- bash /tmp/setup_user.sh
 fi
 
 if [ -d "${HOME}/openmontage" ] && [ -f "${HOME}/openmontage/.git/HEAD" ]; then
