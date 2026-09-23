@@ -826,30 +826,74 @@ fi
 # AGNES_API_KEY : .env existant > variable d'environnement > fichier transporté
 # (/tmp/agnes_key, copié par l'étape 5) > invite interactive > avertissement.
 # (.env est gitignoré : la clé n'est jamais committée)
-if ! grep -q "^AGNES_API_KEY=..*" .env 2>/dev/null; then
+# Toute clé nouvellement fournie est VALIDÉE (POST payload vide -> 400 = acceptée,
+# 401/403 = rejetée ; ne crée rien, ne coûte rien). Rejet en interactif = on redemande.
+_get_agnes_from_sources() {
   _agnes_key="${AGNES_API_KEY:-}"
   if [ -z "${_agnes_key}" ] && [ -f /tmp/agnes_key ]; then
     _agnes_key="$(tr -d ' \t\r\n' < /tmp/agnes_key)"
     rm -f /tmp/agnes_key
     log "Clé Agnes lue depuis /tmp/agnes_key (fichier supprimé)."
   fi
-  if [ -z "${_agnes_key}" ] && [ -t 0 ]; then
-    echo "  ➤ Colle ta clé Agnes AI (Entrée pour ignorer) :"
-    read -rs _agnes_key || _agnes_key=""
-    echo ""
+}
+_prompt_agnes_tty() {
+  [ -t 0 ] || return 1
+  echo "  ➤ Colle ta clé Agnes AI (Entrée pour ignorer) :"
+  read -rs _agnes_key || _agnes_key=""
+  echo ""
+  [ -n "${_agnes_key}" ]
+}
+_validate_agnes() {
+  local code
+  code="$(curl -s -m 20 -o /dev/null -w "%{http_code}" -X POST \
+    "https://apihub.agnes-ai.com/v1/videos" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${_agnes_key}" -d '{}' 2>/dev/null)" || code="000"
+  _agnes_code="${code}"
+  [ "${code}" = 400 ]
+}
+_write_agnes_env() {
+  # `|| true` : grep sort en 1 si rien ne matche (set -e), fichier quand même réécrit
+  grep -v "^AGNES_API_KEY=" .env > .env.tmp || true
+  echo "AGNES_API_KEY=${_agnes_key}" >> .env.tmp
+  mv .env.tmp .env
+}
+if ! grep -q "^AGNES_API_KEY=..*" .env 2>/dev/null; then
+  _tries=0
+  _agnes_key=""
+  _agnes_code=""
+  _get_agnes_from_sources
+  if [ -z "${_agnes_key}" ]; then
+    _prompt_agnes_tty || true
   fi
-  if [ -n "${_agnes_key}" ]; then
-    # `|| true` : grep sort en 1 si rien ne matche (set -e), fichier quand même réécrit
-    grep -v "^AGNES_API_KEY=" .env > .env.tmp || true
-    echo "AGNES_API_KEY=${_agnes_key}" >> .env.tmp
-    mv .env.tmp .env
-    log "AGNES_API_KEY configurée ✓"
-  else
+  while [ -n "${_agnes_key}" ]; do
+    if _validate_agnes; then
+      _write_agnes_env
+      log "AGNES_API_KEY configurée et validée auprès de l'API ✓"
+      break
+    fi
+    if { [ "${_agnes_code}" = 401 ] || [ "${_agnes_code}" = 403 ]; } && [ -t 0 ] && [ "${_tries}" -lt 2 ]; then
+      _tries=$((_tries + 1))
+      echo "  ⚠ Clé rejetée par Agnes (HTTP ${_agnes_code}) — recommence (essai ${_tries}/2)." >&2
+      _agnes_key=""
+      _prompt_agnes_tty || break
+    else
+      if [ "${_agnes_code}" = 401 ] || [ "${_agnes_code}" = 403 ]; then
+        echo "  ⚠ Clé rejetée par Agnes (HTTP ${_agnes_code}) — vérifie-la dans ${OPENMONTAGE_DIR}/.env." >&2
+      else
+        echo "  ⚠ Validation impossible (HTTP ${_agnes_code}) — clé enregistrée quand même." >&2
+      fi
+      _write_agnes_env
+      log "AGNES_API_KEY configurée ✓ (non validée)"
+      break
+    fi
+  done
+  if [ -z "${_agnes_key}" ]; then
     echo "  ⚠ AGNES_API_KEY vide dans ${OPENMONTAGE_DIR}/.env !" >&2
     echo "    Sans clé, la génération vidéo ne fonctionnera pas." >&2
     echo "    Relance avec AGNES_API_KEY=<clé> devant le script, ou édite .env." >&2
   fi
-  unset _agnes_key
+  unset _agnes_key _agnes_code _tries
 else
   log "AGNES_API_KEY déjà configurée ✓"
 fi
