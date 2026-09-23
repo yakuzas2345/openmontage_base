@@ -552,11 +552,17 @@ while true; do
 
   echo ""
   echo "⚠ Clés non encore authentifiées (essai ${attempt}/${MAX_ATTEMPTS})..."
-  echo "  ${GITHUB_HOST_ALIAS} : $([ ${setup_ok} ] && echo '✓' || echo '✗')"
-  echo "  ${GITHUB_MAIN_ALIAS} : $([ ${story_ok} ] && echo '✓' || echo '✗')"
+  # NOTE: `[ false ]` est toujours vrai (chaîne non vide) — tester la valeur explicitement
+  if ${setup_ok}; then setup_mark='✓'; else setup_mark='✗'; fi
+  if ${story_ok}; then story_mark='✓'; else story_mark='✗'; fi
+  echo "  ${GITHUB_HOST_ALIAS} : ${setup_mark}"
+  echo "  ${GITHUB_MAIN_ALIAS} : ${story_mark}"
   echo ""
   _display_keys
   echo "Attends d'avoir ajouté les clés sur GitHub, puis appuie sur Entrée pour réessayer..."
+  # Pause incompressible : en run non-interactif les `read` sont consommés aussitôt —
+  # sans ça les 30 essais s'épuisent en quelques minutes (délai d'activation GitHub)
+  sleep 20
   read -r
 done
 
