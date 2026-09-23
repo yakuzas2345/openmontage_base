@@ -872,7 +872,7 @@ cat >> "${TERMUX_BASHRC}" <<EOF
 
 # openmontage — ajout automatique par setup_termux
 alias ${USER_NAME}="proot-distro login ${DISTRO} --user ${USER_NAME}"
-alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'export PATH=\"/usr/local/bin:\$HOME/.opencode/bin:\$PATH\"; cd /home/${USER_NAME}/openmontage && echo \"Quitter opencode : Ctrl+C (Volume- + C), puis exit. Ecran fige ? tape reset + Entree.\" && opencode; [ -t 0 ] && stty sane 2>/dev/null; bash'"
+alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'export PATH=\"/usr/local/bin:\$HOME/.opencode/bin:\$PATH\"; cd /home/${USER_NAME}/openmontage && echo \"Quitter : /exit ou Ctrl+X Q, puis exit. Ecran fige ? tape reset + Entree.\" && opencode; [ -t 0 ] && stty sane 2>/dev/null; bash'"
 EOF
 echo "  Alias '${USER_NAME}' et 'openmontage' (re)écrits dans ~/.bashrc (Termux)."
 
@@ -909,7 +909,7 @@ EOF
 if [ -t 0 ]; then
 echo "==> Ouverture du shell Ubuntu de '${USER_NAME}', lancement d'opencode..."
 echo "    (opencode s'ouvre dans ~/openmontage, prêt pour ton script de génération)"
-echo "    (Quitter : Ctrl+C puis exit. Écran figé après opencode ? reset + Entrée.)"
+echo "    (Quitter : /exit ou Ctrl+X Q, puis exit. Écran figé ? reset + Entrée.)"
 proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash -c '
     export PATH="/usr/local/bin:$HOME/.opencode/bin:$PATH"
     cd ~/openmontage && opencode ; [ -t 0 ] && stty sane 2>/dev/null; bash
