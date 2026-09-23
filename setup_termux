@@ -707,23 +707,9 @@ else
   log "Branche locale '${BOOTSTRAP_BRANCH}' (issue de origin_main/main): $(git log --oneline -1)"
 fi
 
-# Test d'écriture sur openmontage_setup (miroir du test story) : pousse puis
-# supprime aussitôt une branche temporaire — `main` n'est jamais touché.
-# Valide que la Deploy key 'setup' a bien le droit write (le fetch seul ne le prouve pas).
-_test_setup_write() {
-  local tmp_branch="setup-write-test-$(date +%s)"
-  if git push origin_main "HEAD:refs/heads/${tmp_branch}" 2>/dev/null; then
-    git push origin_main ":refs/heads/${tmp_branch}" 2>/dev/null \
-      && log "Push test sur openmontage_setup ✓ (write OK, branche temporaire supprimée)." \
-      || log "Push test OK, mais supprime à la main la branche '${tmp_branch}' sur openmontage_setup."
-    return 0
-  fi
-  return 1
-}
-if ! _test_setup_write; then
-  echo "  ⚠ Push test vers openmontage_setup ÉCHOUÉ — la clé 'openmontage_setup' est-elle en Deploy key (write) ?" >&2
-  echo "    Le fetch fonctionne, mais les futurs push de setup vers main échoueront." >&2
-fi
+# Pas de test/push ici : l'authentification SSH des deux clés est déjà validée
+# par la boucle de vérification (section 5/8). Les push (setup → main,
+# reproduction scripts → story) sont du ressort de l'agent, au moment utile.
 
 # Normalisation branches/remotes (AGENTS.md) : exactement 2 branches locales
 # (`main` → openmontage_setup/main, `setup_<user>_story` → openmontage_story),
@@ -785,31 +771,10 @@ if confirm "Lancer 'make install-dev' (outils de test pytest) ?"; then
 fi
 log "Setup OpenMontage terminé."
 
-# Pousse la branche de setup vers le repo des storyboards (origin_<branche> / openmontage_story).
-# Raison : crée la branche distante + l'upstream ET valide que la Deploy key
-# 'story' a bien le droit write — mieux vaut le découvrir à l'install qu'au push final.
-# En reprise, si tout est déjà synchronisé, on ne demande rien.
-BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo main)"
-_needs_push=true
-if git rev-parse --verify "@{upstream}" >/dev/null 2>&1; then
-  _ahead="$(git rev-list --count "@{upstream}..HEAD" 2>/dev/null || echo 1)"
-  _behind="$(git rev-list --count "HEAD..@{upstream}" 2>/dev/null || echo 1)"
-  if [ "${_ahead}" = 0 ] && [ "${_behind}" = 0 ]; then
-    _needs_push=false
-    log "Branche '${BRANCH}' déjà à jour sur openmontage_story — push ignoré."
-  fi
-fi
-if ${_needs_push} && confirm "Pousser la branche '${BRANCH}' sur openmontage_story (origin_${BRANCH}) ?"; then
-  if git push -u origin_${BRANCH} "${BRANCH}" 2>&1; then
-    log "Branche '${BRANCH}' poussée et suivie (upstream = origin_${BRANCH}/${BRANCH})."
-  else
-    echo "  ⚠ Le push a échoué — la clé 'openmontage_story' est-elle en Deploy key (write) sur openmontage_story ?" >&2
-    echo "    Retente ensuite: git push -u origin_${BRANCH} ${BRANCH}" >&2
-    exit 1
-  fi
-else
-  log "Branche '${BRANCH}' non poussée — pousse-la plus tard avec: git push -u origin_${BRANCH} ${BRANCH}"
-fi
+# Pas de push ici (ni test, ni branche story) : l'authentification SSH des deux
+# clés est déjà validée par la boucle de vérification (section 5/8). Les push
+# (setup → main, reproduction scripts → story) sont du ressort de l'agent,
+# qui gère aussi les problèmes de branches au moment de la génération vidéo.
 
 # ────────────────────────────────────────────────────────────────────────
 section "7/8 — Clés API (.env)"
