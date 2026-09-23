@@ -852,12 +852,17 @@ cat <<EOF
 Pense à activer les alias :  source ~/.bashrc   (dans Termux)
 EOF
 
+if [ -t 0 ]; then
 echo "==> Ouverture du shell Ubuntu de '${USER_NAME}', lancement d'opencode..."
 echo "    (opencode s'ouvre dans ~/openmontage, prêt pour ton script de génération)"
 proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash -c '
     export PATH="/usr/local/bin:$HOME/.opencode/bin:$PATH"
     cd ~/openmontage && opencode ; bash
 '
+else
+echo "==> Mode non-interactif : shell interactif ignoré (stdin n'est pas un TTY)."
+echo "    Pour ouvrir opencode : proot-distro login ${DISTRO} --user ${USER_NAME}"
+fi
 fi
 
 # Sauvegarder l'état pour reprise ultérieure
