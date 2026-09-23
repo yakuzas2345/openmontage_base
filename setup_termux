@@ -124,14 +124,43 @@ if proot-distro login "${DISTRO}" -- id "${USER_NAME}" >/dev/null 2>&1; then
     STEP4="done"
 else
 step "4/6 — Utilisateur '${USER_NAME}' avec sudo (NOPASSWD)"
-# Heredoc NON quoté : ${USER_NAME} est expansé côté Termux lors de l'écriture du fichier
+# Si le conteneur a déjà UN utilisateur avec /home, c'est lui (cohérence en reprise)
+if [ -d "${ROOTFS}/home" ]; then
+  _cu="$(ls "${ROOTFS}/home" 2>/dev/null || true)"
+  if [ -n "${_cu}" ] && [ "$(printf '%s\n' "${_cu}" | wc -l)" -eq 1 ]; then
+    USER_NAME="${_cu}"
+    log "Utilisateur existant dans le conteneur : '${USER_NAME}'."
+  fi
+fi
+# Nom + mot de passe : invite TTY > NEW_USER/NEW_PASSWORD > défauts.
+# (Tiret interdit dans le nom : il dérive la branche setup_<user>_story.)
+if [ -t 0 ]; then
+  while true; do
+    read -rp "  Nom du nouvel utilisateur Ubuntu [${USER_NAME}] : " _nu < /dev/tty 2>/dev/null || _nu=""
+    _nu="${_nu:-$USER_NAME}"
+    if [[ "${_nu}" =~ ^[a-z_][a-z0-9_]*$ ]] && [ "${#_nu}" -le 32 ]; then USER_NAME="${_nu}"; break; else echo "  Nom invalide (minuscules/chiffres/_, max 32, sans tiret)."; fi
+  done
+  while true; do
+    read -rsp "  Mot de passe pour '${USER_NAME}' : " _pw1 < /dev/tty 2>/dev/null || _pw1=""; echo ""
+    read -rsp "  Confirme le mot de passe : " _pw2 < /dev/tty 2>/dev/null || _pw2=""; echo ""
+    if [ -n "${_pw1}" ] && [[ "${_pw1}" != *:* ]] && [ "${_pw1}" = "${_pw2}" ]; then USER_PASSWORD="${_pw1}"; break; else echo "  Vide, différent ou contenant ':' — recommence."; fi
+  done
+  unset _nu _pw1 _pw2
+else
+  USER_NAME="${NEW_USER:-$USER_NAME}"
+  USER_PASSWORD="${NEW_PASSWORD:-password}"
+  if [[ ! "${USER_NAME}" =~ ^[a-z_][a-z0-9_]*$ ]]; then echo "ERREUR: NEW_USER invalide (minuscules/chiffres/_, sans tiret)." >&2; exit 1; fi
+  if [[ "${USER_PASSWORD}" == *:* ]]; then echo "ERREUR: NEW_PASSWORD ne doit pas contenir ':'." >&2; exit 1; fi
+  log "Non-interactif : utilisateur='${USER_NAME}'."
+fi
+# Heredoc NON quoté : ${USER_NAME}/${USER_PASSWORD} expansés côté Termux à l'écriture
 cat > "${ROOTFS}/tmp/setup_user.sh" <<USERSCRIPT
 set -e
 if id "${USER_NAME}" >/dev/null 2>&1; then
     echo 'Utilisateur déjà présent, on conserve.'
 else
     useradd -m -s /bin/bash "${USER_NAME}"
-    echo "${USER_NAME}:password" | chpasswd
+    echo "${USER_NAME}:${USER_PASSWORD}" | chpasswd
 fi
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo >/dev/null
@@ -143,6 +172,8 @@ echo 'OK — sudo NOPASSWD + password défini'
 USERSCRIPT
 # Login ROOT : l'utilisateur n'existe pas encore, `--user` échouerait ("no user defined")
 proot-distro login "${DISTRO}" -- bash /tmp/setup_user.sh
+# Le script contenait le mot de passe en clair : suppression immédiate
+rm -f "${ROOTFS}/tmp/setup_user.sh"
 fi
 
 if [ -d "${ROOTFS}/home/${USER_NAME}/openmontage" ] && [ -f "${ROOTFS}/home/${USER_NAME}/openmontage/.git/HEAD" ]; then
