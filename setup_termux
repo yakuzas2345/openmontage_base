@@ -682,9 +682,10 @@ else
 fi
 
 # Problème 24: deps Python supplémentaires (pillow, numpy, imageio)
-# Un run précédent a pu laisser un .venv partiel (venv sans ensurepip) — le valider avant usage
-if [ -d .venv ] && { [ ! -x .venv/bin/python ] || ! .venv/bin/python -V >/dev/null 2>&1; }; then
-  log "venv existant mais cassé — recréation..."
+# Un run précédent a pu laisser un .venv partiel (venv sans ensurepip : bin/python
+# présent mais bin/activate absent) — seul activate prouve un venv complet
+if [ -d .venv ] && [ ! -f .venv/bin/activate ]; then
+  log "venv existant mais incomplet — recréation..."
   rm -rf .venv
 fi
 if [ -d .venv ]; then
