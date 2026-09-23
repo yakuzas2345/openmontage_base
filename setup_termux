@@ -151,13 +151,15 @@ if [ -t 0 ]; then
   echo "  │  CRÉATION DU COMPTE UBUNTU — réponds aux 3 questions │"
   echo "  └─────────────────────────────────────────────────┘"
   while true; do
-    read -rp "  Nom du nouvel utilisateur Ubuntu [${USER_NAME}] : " _nu < /dev/tty 2>/dev/null || _nu=""
+    # Lire sur stdin (testé TTY par `[ -t 0 ]`) — PAS sur /dev/tty, qui peut
+    # manquer même avec un stdin terminal (pas de terminal contrôlant).
+    read -rp "  Nom du nouvel utilisateur Ubuntu [${USER_NAME}] : " _nu || _nu=""
     _nu="${_nu:-$USER_NAME}"
     if [[ "${_nu}" =~ ^[a-z_][a-z0-9_]*$ ]] && [ "${#_nu}" -le 32 ]; then USER_NAME="${_nu}"; break; else echo "  Nom invalide (minuscules/chiffres/_, max 32, sans tiret)."; fi
   done
   while true; do
-    read -rsp "  Mot de passe pour '${USER_NAME}' : " _pw1 < /dev/tty 2>/dev/null || _pw1=""; echo ""
-    read -rsp "  Confirme le mot de passe : " _pw2 < /dev/tty 2>/dev/null || _pw2=""; echo ""
+    read -rsp "  Mot de passe pour '${USER_NAME}' : " _pw1 || _pw1=""; echo ""
+    read -rsp "  Confirme le mot de passe : " _pw2 || _pw2=""; echo ""
     if [ -n "${_pw1}" ] && [[ "${_pw1}" != *:* ]] && [ "${_pw1}" = "${_pw2}" ]; then USER_PASSWORD="${_pw1}"; break; else echo "  Vide, différent ou contenant ':' — recommence."; fi
   done
   unset _nu _pw1 _pw2
@@ -805,7 +807,7 @@ if ! grep -q "^AGNES_API_KEY=..*" .env 2>/dev/null; then
   fi
   if [ -z "${_agnes_key}" ] && [ -t 0 ]; then
     echo "  ➤ Colle ta clé Agnes AI (Entrée pour ignorer) :"
-    read -rs _agnes_key < /dev/tty 2>/dev/null || _agnes_key=""
+    read -rs _agnes_key || _agnes_key=""
     echo ""
   fi
   if [ -n "${_agnes_key}" ]; then
