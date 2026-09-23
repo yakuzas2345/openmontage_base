@@ -504,8 +504,13 @@ _display_keys
 
 # Problème 2/20: tester SSH dès que les clés existent, pas après attente utilisateur
 log "Test rapide de authentification SSH..."
+# `ssh -T` vers GitHub sort TOUJOURS en code 1 (même si authentifié) : avec
+# `pipefail`, `ssh ... | grep -q` ne peut donc jamais réussir. On neutralise
+# le code de ssh et on laisse grep décider seul.
 _ssh_test_ok() {
-  ssh -T -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 "git@$1" 2>&1 | grep -q "successfully authenticated"
+  local out
+  out="$(ssh -T -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 "git@$1" 2>&1 || true)"
+  grep -q "successfully authenticated" <<<"${out}"
 }
 if _ssh_test_ok "${GITHUB_HOST_ALIAS}"; then
   log "SSH '${GITHUB_HOST_ALIAS}' déjà authentifié ✓"
@@ -522,10 +527,13 @@ echo "Attends d'avoir ajouté LES DEUX clés sur GitHub, puis appuie sur Entrée
 read -r
 
 # Vérification itérative des clés SSH — boucle tant que les 2 clés ne sont pas validées
+# (même remarque pipefail que _ssh_test_ok ci-dessus : le code de ssh est neutralisé)
 _check_ssh() {
   local alias="$1"
   echo "  -> ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@$alias"
-  ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@$alias 2>&1 | grep -q "successfully authenticated"
+  local out
+  out="$(ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@$alias 2>&1 || true)"
+  grep -q "successfully authenticated" <<<"${out}"
 }
 
 # Boucle de vérification : affiche les clés à chaque échec et réessaie
