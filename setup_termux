@@ -387,6 +387,12 @@ else
 fi
 export PATH="${HOME}/.opencode/bin:${PATH}"
 opencode --version
+# `bash -c` (alias openmontage, scripts non-interactifs) ne lit pas ~/.bashrc :
+# exposer opencode sur le PATH par défaut via /usr/local/bin, quel que soit l'invocateur
+if [ -x "${HOME}/.opencode/bin/opencode" ]; then
+  sudo ln -sf "${HOME}/.opencode/bin/opencode" /usr/local/bin/opencode
+  log "Symlink /usr/local/bin/opencode → ${HOME}/.opencode/bin/opencode"
+fi
 
 # Configuration opencode (provider Agnes, identique à la machine source)
 OPTCFG="${HOME}/.config/opencode/opencode.jsonc"
@@ -804,24 +810,20 @@ STEP5="done"
 fi
 
 # Problème 12/13: aliases corrigés pour les deux environnements
-if grep -q "alias openmontage=" "${HOME}/.bashrc" 2>/dev/null; then
-    STEP6="done"
-else
+# Étape rejouée à chaque run (pas de skip) : les alias sont remplacés, pas seulement ajoutés
 step "6/6 — Alias openmontage (Termux + Ubuntu)"
 
-# Alias au niveau Termux (corrigé — utilise le bon chemin)
+# Alias au niveau Termux : remplacé à chaque run pour propager les corrections.
+# PATH exporté inline car `bash -c` ne lit pas ~/.bashrc.
 TERMUX_BASHRC="${HOME}/.bashrc"
-if grep -q "alias openmontage=" "${TERMUX_BASHRC}" 2>/dev/null; then
-    echo "  ~/.bashrc (Termux) : alias openmontage déjà présent — inchangé."
-else
-    cat >> "${TERMUX_BASHRC}" <<EOF
+sed -i '/^alias openmontage=/d; /^alias '"${USER_NAME}"'=/d; /# openmontage — ajout automatique par setup_termux/d' "${TERMUX_BASHRC}" 2>/dev/null || true
+cat >> "${TERMUX_BASHRC}" <<EOF
 
 # openmontage — ajout automatique par setup_termux
 alias ${USER_NAME}="proot-distro login ${DISTRO} --user ${USER_NAME}"
-alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'cd /home/${USER_NAME}/openmontage && opencode ; bash'"
+alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'export PATH=\"/usr/local/bin:\$HOME/.opencode/bin:\$PATH\"; cd /home/${USER_NAME}/openmontage && opencode ; bash'"
 EOF
-    echo "  Alias '${USER_NAME}' et 'openmontage' ajoutés dans ~/.bashrc (Termux)."
-fi
+echo "  Alias '${USER_NAME}' et 'openmontage' (re)écrits dans ~/.bashrc (Termux)."
 
 # Alias au niveau de l'utilisateur Ubuntu dans le conteneur
 # Problème 13: inclure /usr/local/bin dans PATH
@@ -864,7 +866,7 @@ else
 echo "==> Mode non-interactif : shell interactif ignoré (stdin n'est pas un TTY)."
 echo "    Pour ouvrir opencode : proot-distro login ${DISTRO} --user ${USER_NAME}"
 fi
-fi
+STEP6="done"
 
 # Sauvegarder l'état pour reprise ultérieure
 cat > "${HOME}/.openmontage_resume_state" << EOF
