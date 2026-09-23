@@ -707,6 +707,24 @@ else
   log "Branche locale '${BOOTSTRAP_BRANCH}' (issue de origin_main/main): $(git log --oneline -1)"
 fi
 
+# Test d'écriture sur openmontage_setup (miroir du test story) : pousse puis
+# supprime aussitôt une branche temporaire — `main` n'est jamais touché.
+# Valide que la Deploy key 'setup' a bien le droit write (le fetch seul ne le prouve pas).
+_test_setup_write() {
+  local tmp_branch="setup-write-test-$(date +%s)"
+  if git push origin_main "HEAD:refs/heads/${tmp_branch}" 2>/dev/null; then
+    git push origin_main ":refs/heads/${tmp_branch}" 2>/dev/null \
+      && log "Push test sur openmontage_setup ✓ (write OK, branche temporaire supprimée)." \
+      || log "Push test OK, mais supprime à la main la branche '${tmp_branch}' sur openmontage_setup."
+    return 0
+  fi
+  return 1
+}
+if ! _test_setup_write; then
+  echo "  ⚠ Push test vers openmontage_setup ÉCHOUÉ — la clé 'openmontage_setup' est-elle en Deploy key (write) ?" >&2
+  echo "    Le fetch fonctionne, mais les futurs push de setup vers main échoueront." >&2
+fi
+
 # Normalisation branches/remotes (AGENTS.md) : exactement 2 branches locales
 # (`main` → openmontage_setup/main, `setup_<user>_story` → openmontage_story),
 # aucun tiret nulle part. Converge à chaque run (nettoie les résidus).
