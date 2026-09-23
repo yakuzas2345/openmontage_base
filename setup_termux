@@ -186,7 +186,7 @@ NODE_MAJOR="${NODE_MAJOR:-22}"
 SRC_ENV="${1:-}"
 # Branche locale créée par le setup (jamais 'main') — format: setup_<username>_story
 # Jamais de tiret dans les noms de branche (règle AGENTS.md)
-BOOTSTRAP_BRANCH="${BOOTSTRAP_BRANCH:-setup-$(whoami 2>/dev/null || echo user)_story}"
+BOOTSTRAP_BRANCH="${BOOTSTRAP_BRANCH:-setup_$(whoami 2>/dev/null || echo user)_story}"
 
 section() { echo; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; echo "▶ $1"; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
 log()     { echo "  · $1"; }
@@ -248,7 +248,8 @@ measure_apt_deps() {
   command -v ffprobe >/dev/null 2>&1 || want ffprobe ffmpeg
   command -v python3 >/dev/null 2>&1 || want python3 python3
   command -v pip3    >/dev/null 2>&1 || want pip3 python3-pip
-  if ! python3 -c "import venv" >/dev/null 2>&1; then want venv python3-venv; fi
+  # `import venv` passe même sans ensurepip (python3 -m venv échoue alors) — tester les deux
+  if ! python3 -c "import venv, ensurepip" >/dev/null 2>&1; then want venv python3-venv; fi
   APT_NEEDED="${!pkgs[*]}"
 }
 
