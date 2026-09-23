@@ -597,6 +597,12 @@ if [ -d .git ]; then
   git remote get-url "${STORY_REMOTE}" >/dev/null 2>&1 \
     || git remote add "${STORY_REMOTE}" "git@${GITHUB_MAIN_ALIAS}:${GITHUB_STORY_REPO}"
   git pull --ff-only || log "pull a échoué (ignore — branche locale divergente ?)"
+  # Reprise : se replacer sur la branche de setup (convention `_`), pas sur un résidu
+  if [ "$(git symbolic-ref --short HEAD 2>/dev/null)" != "${BOOTSTRAP_BRANCH}" ]; then
+    git checkout "${BOOTSTRAP_BRANCH}" 2>/dev/null \
+      || git checkout -b "${BOOTSTRAP_BRANCH}" origin_main/main
+    log "Positionné sur '${BOOTSTRAP_BRANCH}'."
+  fi
 else
   log "Initialisation de git dans ${OPENMONTAGE_DIR} (pas de clone) ..."
   git init -q
@@ -676,6 +682,11 @@ else
 fi
 
 # Problème 24: deps Python supplémentaires (pillow, numpy, imageio)
+# Un run précédent a pu laisser un .venv partiel (venv sans ensurepip) — le valider avant usage
+if [ -d .venv ] && { [ ! -x .venv/bin/python ] || ! .venv/bin/python -V >/dev/null 2>&1; }; then
+  log "venv existant mais cassé — recréation..."
+  rm -rf .venv
+fi
 if [ -d .venv ]; then
   # shellcheck disable=SC1091
   . .venv/bin/activate
