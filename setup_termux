@@ -146,6 +146,10 @@ fi
 # Nom + mot de passe : invite TTY > NEW_USER/NEW_PASSWORD > défauts.
 # (Tiret interdit dans le nom : il dérive la branche setup_<user>_story.)
 if [ -t 0 ]; then
+  echo ""
+  echo "  ┌─────────────────────────────────────────────────┐"
+  echo "  │  CRÉATION DU COMPTE UBUNTU — réponds aux 3 questions │"
+  echo "  └─────────────────────────────────────────────────┘"
   while true; do
     read -rp "  Nom du nouvel utilisateur Ubuntu [${USER_NAME}] : " _nu < /dev/tty 2>/dev/null || _nu=""
     _nu="${_nu:-$USER_NAME}"
