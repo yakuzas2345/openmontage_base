@@ -145,8 +145,9 @@ USERSCRIPT
 proot-distro login "${DISTRO}" -- bash /tmp/setup_user.sh
 fi
 
-if [ -d "${HOME}/openmontage" ] && [ -f "${HOME}/openmontage/.git/HEAD" ]; then
+if [ -d "${ROOTFS}/home/${USER_NAME}/openmontage" ] && [ -f "${ROOTFS}/home/${USER_NAME}/openmontage/.git/HEAD" ]; then
     STEP5="done"
+    log "Repo OpenMontage déjà présent dans le conteneur — étape 5 skippée."
 else
 step "5/6 — Installation opencode + OpenMontage dans le PRoot (setup_ubuntu.sh adapté)"
 cat > "${ROOTFS}/tmp/setup_ubuntu_pr.sh" <<'PR_UBUNTU_SCRIPT'
@@ -200,7 +201,8 @@ confirm() {
     1|true|yes|oui) echo "  · $msg → oui (ASSUME_YES)"; return 0 ;;
   esac
   while true; do
-    read -r -p "  ${msg} [O/n] " ans
+    # EOF (Ctrl+D / stdin non-TTY sans feeder) = Non, pas une boucle infinie
+    read -r -p "  ${msg} [O/n] " ans || return 1
     case "${ans:-O}" in
       O|o|oui|Oui|y|Y|yes|Yes) return 0 ;;
       n|N|non|Non|no|No)        return 1 ;;
@@ -633,24 +635,6 @@ else
     log "Script déplacé en .bootstrap/ pour libérer le checkout ..."
   fi
 
-  # Problème 15: branch naming — toujours utiliser _ (jamais -)
-  # Vérifier si la branche existe déjà sur le remote et ajouter suffixe numeric
-  _ensure_bootstrap_branch() {
-    local branch="$1"
-    # Vérifier si la branche existe localement
-    if git branch --list "${branch}" | grep -q "${branch}"; then
-      log "Branche locale '${branch}' existe déjà."
-      return 0
-    fi
-    # Vérifier si la branche existe sur le remote
-    if git ls-remote --heads "${STORY_REMOTE}" "${branch}" 2>/dev/null | grep -q "${branch}"; then
-      log "Branche远程 '${branch}' existe — création locale."
-      git checkout -b "${branch}" "${STORY_REMOTE}/${branch}" 2>/dev/null && return 0
-    fi
-    # Créer la branche à partir de origin_main/main
-    git checkout -b "${branch}" origin_main/main 2>&1
-  }
-
   # Nouvelle branche locale (JAMAIS 'main') issue de origin_main/main
   # Gérer les conflits de noms de branche (problème 15)
   if ! git checkout -b "${BOOTSTRAP_BRANCH}" origin_main/main 2>&1; then
@@ -687,6 +671,11 @@ fi
 # aucun tiret nulle part. Converge à chaque run (nettoie les résidus).
 _normalize_branches() {
   local b r
+  # D'abord se placer sur la branche cible : on ne peut pas supprimer la branche courante
+  git branch --track main origin_main/main 2>/dev/null || true
+  git checkout -q "${BOOTSTRAP_BRANCH}" 2>/dev/null || git checkout -qb "${BOOTSTRAP_BRANCH}" origin_main/main
+  git branch --set-upstream-to="origin_${BOOTSTRAP_BRANCH}/${BOOTSTRAP_BRANCH}" 2>/dev/null \
+    || log "Upstream setup '${BOOTSTRAP_BRANCH}' pas encore créé — premier push le créera."
   for b in $(git for-each-ref --format='%(refname:short)' refs/heads/); do
     case "${b}" in
       *-* ) git branch -D "${b}" 2>/dev/null && log "Branche résiduelle '${b}' supprimée (tiret interdit)." || true ;;
@@ -697,10 +686,6 @@ _normalize_branches() {
       *-* ) git remote remove "${r}" 2>/dev/null && log "Remote résiduel '${r}' supprimé (tiret interdit)." || true ;;
     esac
   done
-  git branch --track main origin_main/main 2>/dev/null || true
-  git checkout -q "${BOOTSTRAP_BRANCH}" 2>/dev/null || git checkout -qb "${BOOTSTRAP_BRANCH}" origin_main/main
-  git branch --set-upstream-to="origin_${BOOTSTRAP_BRANCH}/${BOOTSTRAP_BRANCH}" 2>/dev/null \
-    || log "Upstream setup '${BOOTSTRAP_BRANCH}' pas encore créé — premier push le créera."
   log "Branches locales : $(git for-each-ref --format='%(refname:short)' refs/heads/ | tr '\n' ' ')"
 }
 _normalize_branches
@@ -783,7 +768,8 @@ if ! grep -q "^AGNES_API_KEY=..*" .env 2>/dev/null; then
     echo ""
   fi
   if [ -n "${_agnes_key}" ]; then
-    grep -v "^AGNES_API_KEY=" .env > .env.tmp
+    # `|| true` : grep sort en 1 si rien ne matche (set -e), fichier quand même réécrit
+    grep -v "^AGNES_API_KEY=" .env > .env.tmp || true
     echo "AGNES_API_KEY=${_agnes_key}" >> .env.tmp
     mv .env.tmp .env
     log "AGNES_API_KEY configurée ✓"
@@ -807,7 +793,9 @@ if [ -d /usr/share/nodejs/corepack/shims ]; then
 fi
 
 # shellcheck disable=SC2317
-report_runtime_gaps
+# `|| true` : la fonction sort en 1 quand il manque des outils (set -e),
+# et c'est le test GAPS ci-dessous qui décide de la suite
+report_runtime_gaps || true
 if [ -z "${GAPS}" ]; then
   log "Tous les outils runtime sont présents ✓"
 else
@@ -872,7 +860,7 @@ cat >> "${TERMUX_BASHRC}" <<EOF
 
 # openmontage — ajout automatique par setup_termux
 alias ${USER_NAME}="proot-distro login ${DISTRO} --user ${USER_NAME}"
-alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'export PATH=\"/usr/local/bin:\$HOME/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; cd /home/${USER_NAME}/openmontage && echo \"Quitter : /exit ou Ctrl+X Q, puis exit. Ecran fige ? tape reset + Entree.\" && opencode; [ -t 0 ] && stty sane 2>/dev/null; bash'"
+alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'export PATH=\"/usr/local/bin:\$HOME/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\"; cd /home/${USER_NAME}/openmontage && opencode; [ -t 0 ] && stty sane 2>/dev/null; bash'"
 EOF
 echo "  Alias '${USER_NAME}' et 'openmontage' (re)écrits dans ~/.bashrc (Termux)."
 
