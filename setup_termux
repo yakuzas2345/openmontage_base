@@ -800,6 +800,7 @@ proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash /tmp/setup_ubuntu_p
     exit 1
 }
 rm -f "${ROOTFS}/tmp/setup_ubuntu_pr.sh"
+STEP5="done"
 fi
 
 # Problème 12/13: aliases corrigés pour les deux environnements
