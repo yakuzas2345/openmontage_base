@@ -133,42 +133,56 @@ fi
 if proot-distro login "${DISTRO}" -- id "${USER_NAME}" >/dev/null 2>&1; then
     STEP4="done"
 else
-step "4/6 — Utilisateur '${USER_NAME}' avec sudo (NOPASSWD)"
-# Si le conteneur a déjà UN utilisateur avec /home (hors compte stock `ubuntu`
-# livré avec l'image), c'est lui (cohérence en reprise)
-if [ -d "${ROOTFS}/home" ]; then
-  _cu="$(ls "${ROOTFS}/home" 2>/dev/null || true)"
-  if [ -n "${_cu}" ] && [ "$(printf '%s\n' "${_cu}" | wc -l)" -eq 1 ] && [ "${_cu}" != "ubuntu" ]; then
-    USER_NAME="${_cu}"
-    log "Utilisateur existant dans le conteneur : '${USER_NAME}'."
-  fi
-fi
-# Nom + mot de passe : invite TTY > NEW_USER/NEW_PASSWORD > défauts.
-# (Tiret interdit dans le nom : il dérive la branche setup_<user>_story.)
+step "4/6 — Utilisateur avec sudo (NOPASSWD)"
+# Utilisateurs humains du conteneur (uid >= 1000, hors nobody), lus dans son /etc/passwd.
+# Tout passe par stdin (jamais /dev/tty) : `select` et `read` lisent stdin.
+_list_container_users() {
+  awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' "${ROOTFS}/etc/passwd" 2>/dev/null || true
+}
 if [ -t 0 ]; then
   echo ""
-  echo "  ┌─────────────────────────────────────────────────┐"
-  echo "  │  CRÉATION DU COMPTE UBUNTU — réponds aux 3 questions │"
-  echo "  └─────────────────────────────────────────────────┘"
-  while true; do
-    # Lire sur stdin (testé TTY par `[ -t 0 ]`) — PAS sur /dev/tty, qui peut
-    # manquer même avec un stdin terminal (pas de terminal contrôlant).
-    read -rp "  Nom du nouvel utilisateur Ubuntu [${USER_NAME}] : " _nu || _nu=""
-    _nu="${_nu:-$USER_NAME}"
-    if [[ "${_nu}" =~ ^[a-z_][a-z0-9_]*$ ]] && [ "${#_nu}" -le 32 ]; then USER_NAME="${_nu}"; break; else echo "  Nom invalide (minuscules/chiffres/_, max 32, sans tiret)."; fi
+  echo "  ┌──────────────────────────────────────────────────┐"
+  echo "  │  COMPTE UBUNTU — choisis un numéro                │"
+  echo "  │  (Ctrl+C pour abandonner)                         │"
+  echo "  └──────────────────────────────────────────────────┘"
+  _menu=()
+  while IFS= read -r _u; do [ -n "${_u}" ] && _menu+=("${_u}"); done < <(_list_container_users)
+  _menu+=("Créer un nouvel utilisateur")
+  PS3="  Ton choix [1-${#_menu[@]}] : "
+  select _pick in "${_menu[@]}"; do
+    if [ -n "${_pick}" ]; then break; else echo "  Choix invalide — un numéro entre 1 et ${#_menu[@]}."; fi
   done
-  while true; do
-    read -rsp "  Mot de passe pour '${USER_NAME}' : " _pw1 || _pw1=""; echo ""
-    read -rsp "  Confirme le mot de passe : " _pw2 || _pw2=""; echo ""
-    if [ -n "${_pw1}" ] && [[ "${_pw1}" != *:* ]] && [ "${_pw1}" = "${_pw2}" ]; then USER_PASSWORD="${_pw1}"; break; else echo "  Vide, différent ou contenant ':' — recommence."; fi
-  done
-  unset _nu _pw1 _pw2
+  if [ "${_pick}" = "Créer un nouvel utilisateur" ]; then
+    # Tiret interdit dans le nom : il dérive la branche setup_<user>_story.
+    while true; do
+      read -rp "  Nom du nouvel utilisateur : " _nu || _nu=""
+      if [[ "${_nu}" =~ ^[a-z_][a-z0-9_]*$ ]] && [ "${#_nu}" -le 32 ]; then USER_NAME="${_nu}"; break; else echo "  Nom invalide (minuscules/chiffres/_, max 32, sans tiret)."; fi
+    done
+    while true; do
+      read -rsp "  Mot de passe pour '${USER_NAME}' : " _pw1 || _pw1=""; echo ""
+      read -rsp "  Confirme le mot de passe : " _pw2 || _pw2=""; echo ""
+      if [ -n "${_pw1}" ] && [[ "${_pw1}" != *:* ]] && [ "${_pw1}" = "${_pw2}" ]; then USER_PASSWORD="${_pw1}"; break; else echo "  Vide, différent ou contenant ':' — recommence."; fi
+    done
+    unset _nu _pw1 _pw2
+  else
+    USER_NAME="${_pick}"
+    USER_PASSWORD="password"
+    log "Reprise avec l'utilisateur existant '${USER_NAME}' (mot de passe inchangé)."
+  fi
+  unset _pick _menu
 else
-  USER_NAME="${NEW_USER:-$USER_NAME}"
+  # Non-interactif : NEW_USER > existant unique (hors stock ubuntu) > défaut.
+  _cands="$(_list_container_users | grep -vx "ubuntu" || true)"
+  if [ -n "${NEW_USER:-}" ]; then
+    USER_NAME="${NEW_USER}"
+  elif [ -n "${_cands}" ] && [ "$(printf '%s\n' "${_cands}" | wc -l)" -eq 1 ]; then
+    USER_NAME="${_cands}"
+    log "Non-interactif : reprise avec l'utilisateur existant '${USER_NAME}'."
+  fi
   USER_PASSWORD="${NEW_PASSWORD:-password}"
-  if [[ ! "${USER_NAME}" =~ ^[a-z_][a-z0-9_]*$ ]]; then echo "ERREUR: NEW_USER invalide (minuscules/chiffres/_, sans tiret)." >&2; exit 1; fi
-  if [[ "${USER_PASSWORD}" == *:* ]]; then echo "ERREUR: NEW_PASSWORD ne doit pas contenir ':'." >&2; exit 1; fi
-  log "Non-interactif : utilisateur='${USER_NAME}'."
+  if [[ ! "${USER_NAME}" =~ ^[a-z_][a-z0-9_]*$ ]]; then echo "ERREUR: nom d'utilisateur invalide (minuscules/chiffres/_, sans tiret)." >&2; exit 1; fi
+  if [[ "${USER_PASSWORD}" == *:* ]]; then echo "ERREUR: mot de passe ne doit pas contenir ':'." >&2; exit 1; fi
+  unset _cands
 fi
 # Heredoc NON quoté : ${USER_NAME}/${USER_PASSWORD} expansés côté Termux à l'écriture
 cat > "${ROOTFS}/tmp/setup_user.sh" <<USERSCRIPT
