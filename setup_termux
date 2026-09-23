@@ -767,10 +767,16 @@ else
   cp .env.example .env
   log ".env créé depuis .env.example"
 fi
-# AGNES_API_KEY : variable d'environnement > invite interactive > avertissement.
+# AGNES_API_KEY : .env existant > variable d'environnement > fichier transporté
+# (/tmp/agnes_key, copié par l'étape 5) > invite interactive > avertissement.
 # (.env est gitignoré : la clé n'est jamais committée)
 if ! grep -q "^AGNES_API_KEY=..*" .env 2>/dev/null; then
   _agnes_key="${AGNES_API_KEY:-}"
+  if [ -z "${_agnes_key}" ] && [ -f /tmp/agnes_key ]; then
+    _agnes_key="$(tr -d ' \t\r\n' < /tmp/agnes_key)"
+    rm -f /tmp/agnes_key
+    log "Clé Agnes lue depuis /tmp/agnes_key (fichier supprimé)."
+  fi
   if [ -z "${_agnes_key}" ] && [ -t 0 ]; then
     echo "  ➤ Colle ta clé Agnes AI (Entrée pour ignorer) :"
     read -rs _agnes_key < /dev/tty 2>/dev/null || _agnes_key=""
@@ -836,6 +842,13 @@ echo
 echo "Garde tes secrets hors de tout commit — .env est gitignoré."
 PR_UBUNTU_SCRIPT
 chmod 755 "${ROOTFS}/tmp/setup_ubuntu_pr.sh"
+# Transport clé Agnes vers le conteneur (l'env ne traverse pas `proot-distro login`).
+# Usage : AGNES_KEY_FILE=/chemin/vers/fichier_clé bash setup_termux
+if [ -n "${AGNES_KEY_FILE:-}" ] && [ -f "${AGNES_KEY_FILE}" ]; then
+  cp "${AGNES_KEY_FILE}" "${ROOTFS}/tmp/agnes_key"
+  chmod 600 "${ROOTFS}/tmp/agnes_key"
+  log "Clé Agnes transmise au conteneur (/tmp/agnes_key)."
+fi
 
 echo "==> Lancement du script d'installation DANS le conteneur (utilisateur ${USER_NAME})..."
 proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash /tmp/setup_ubuntu_pr.sh || {
