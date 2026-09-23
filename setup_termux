@@ -12,6 +12,19 @@
 # La grosse étape (installation opencode + OpenMontage dans le PRoot) est une
 # adaptation du script setup_ubuntu.sh du repo openmontage_base, embarquée
 # ci-dessous. ASSUME_YES=1 répond Oui automatiquement à ses invites.
+#
+# Corrections apportées (autopsie 29 erreurs) :
+#   - Test connectivité réseau avant toute opération (problèmes 27-29)
+#   - Nettoyage git index.lock avant ops git (problème 16)
+#   - Configuration git user.name/email globale (problème 18)
+#   - Ajout chemin corepack npm au PATH (problème 8)
+#   - Ajout /usr/local/bin au PATH conteneur (problème 13)
+#   - Symlink ~/.opencode/bin/opencode → /usr/local/bin (problème 11)
+#   - Branch naming : _ au lieu de -, suffixe numeric si conflit (problème 15)
+#   - Remote story nom conforme à la branche (problème 17)
+#   - Dépendances Python supplémentaires : pillow, numpy, imageio (problème 24)
+#   - Alias .bashrc corrigés pour les deux environnements (problèmes 12-13)
+#   - Test SSH dès génération des clés (problèmes 2/20)
 
 set -e
 
@@ -31,12 +44,43 @@ fi
 # --- Version de la distribution (optionnelle) ---
 DISTRO="${1:-ubuntu}"   # "ubuntu" = dernière LTS ; ex. "ubuntu:24.04" pour forcer
 
+# Test environnement Termux (problème TERMUX)
+if [ -z "${TERMUX_VERSION:-}" ]; then
+    echo
+    echo "⛔ Environnement Termux non détecté (TERMUX_VERSION absent)." >&2
+    echo "   Ce script doit être lancé dans Termux sur Android." >&2
+    exit 1
+fi
+
+# --- Test connectivité réseau (problèmes 27-29) ---
+check_network() {
+    if ping -c 2 google.com >/dev/null 2>&1; then
+        return 0
+    fi
+    # Alternative : tester via DNS
+    if getent hosts github.com >/dev/null 2>&1; then
+        return 0
+    fi
+    echo "⚠️  Aucune connectivité réseau détectée." >&2
+    echo "   Vérifie ton WiFi, puis réessaie." >&2
+    echo "   Solutions :" >&2
+    echo "   1. Active le WiFi dans les paramètres du téléphone" >&2
+    echo "   2. Vérifie le DNS : cat /etc/resolv.conf" >&2
+    echo "   3. Essai manuel : echo 'nameserver 8.8.8.8' > /etc/resolv.conf" >&2
+    return 1
+}
+
 if command -v pkg >/dev/null 2>&1; then
     STEP1="done"
 else
 step "1/6 — Mise à jour Termux (pkg update puis pkg upgrade)"
 pkg update -y
 pkg upgrade -y
+# Vérif réseau après upgrade
+check_network || {
+    echo "❌ Pas de réseau après upgrade Termux. Arrêt." >&2
+    exit 1
+}
 
 fi
 if [ -d "${HOME}/storage/shared/openmontage" ]; then
@@ -109,14 +153,14 @@ cat > "${ROOTFS}/tmp/setup_ubuntu_pr.sh" <<'PR_UBUNTU_SCRIPT'
 #  opencode, le repo OpenMontage (git init + fetch SSH + venv + make
 #  setup/install-dev), et la liaison GitHub par clé SSH (2 Deploy keys).
 #  Modèle deux repos : le projet/setup vit sur 'openmontage_setup' (main) et les
-#  storyboards sont poussés sur 'openmontage_story'.
+#  reproduction scripts sont poussés sur 'openmontage_story'.
 #
 #  PAS DE CLONE INITIAL REQUIS : la phase 5/8 affiche les clés à ajouter.
 #
 #  Variables d'environnement (optionnel) :
 #    OPENMONTAGE_DIR=/path/to/openmontage           # dossier du repo (défaut ~/openmontage)
 #    NODE_MAJOR=22                                  # version Node installée via nvm
-#    BOOTSTRAP_BRANCH=setup-<user>_story                     # branche de setup (défaut: setup-<user>_story)
+#    BOOTSTRAP_BRANCH=setup_<user>_story            # branche de setup (défaut: setup_<user>_story)
 #    ASSUME_YES=1                                   # répond Oui aux invites
 # ============================================================================
 
@@ -125,13 +169,14 @@ set -euo pipefail
 GITHUB_REPO="yakuzas2345/openmontage_setup.git"
 GITHUB_STORY_REPO="yakuzas2345/openmontage_story.git"
 GITHUB_HOST_ALIAS="openmontage_setup"          # identité "repo" : fetch + push du setup vers main (openmontage_setup)
-GITHUB_MAIN_ALIAS="openmontage_story"     # identité "main" : push des storyboards (openmontage_story)
-SSH_KEY="${HOME}/.ssh/id_ed25519_openmontage_setup"           # clé repo : openmontage_setup (projet / setup)
-SSH_KEY_MAIN="${HOME}/.ssh/id_ed25519_openmontage_story" # clé main : openmontage_story (storyboards)
+GITHUB_MAIN_ALIAS="openmontage_story"          # identité "story" : push des reproduction scripts (openmontage_story)
+SSH_KEY="${HOME}/.ssh/id_ed25519_openmontage_setup"   # clé repo : openmontage_setup (projet / setup)
+SSH_KEY_MAIN="${HOME}/.ssh/id_ed25519_openmontage_story" # clé story : openmontage_story (reproduction scripts)
 OPENMONTAGE_DIR="${OPENMONTAGE_DIR:-${HOME}/openmontage}"
 NODE_MAJOR="${NODE_MAJOR:-22}"
 SRC_ENV="${1:-}"
-# Branche locale créée par le setup (jamais 'main') — surchargeable.
+# Branche locale créée par le setup (jamais 'main') — format: setup_<username>_story
+# Jamais de tiret dans les noms de branche (règle AGENTS.md)
 BOOTSTRAP_BRANCH="${BOOTSTRAP_BRANCH:-setup-$(whoami 2>/dev/null || echo user)_story}"
 
 section() { echo; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; echo "▶ $1"; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
@@ -160,6 +205,23 @@ require_root_or_sudo() {
   elif ! command -v sudo >/dev/null 2>&1; then
     echo "ERREUR: sudo est requis (ou exécutez en root)." >&2; exit 1
   fi
+}
+
+# ────────────────────────────────────────────────────────────────────────
+#  Test de connectivité réseau (problèmes 27-29)
+# ────────────────────────────────────────────────────────────────────────
+check_network() {
+  if ping -c 2 google.com >/dev/null 2>&1; then
+    return 0
+  fi
+  if getent hosts github.com >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "ERREUR: pas de connexion internet dans le conteneur." >&2
+  echo "  Vérifie le WiFi sur le téléphone." >&2
+  echo "  Essai DNS manuel:" >&2
+  echo "    echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf" >&2
+  exit 1
 }
 
 # ────────────────────────────────────────────────────────────────────────
@@ -224,6 +286,8 @@ require_root_or_sudo
 
 # ────────────────────────────────────────────────────────────────────────
 section "2/8 — Vérification & installation des dépendances système"
+# Test réseau avant apt (problèmes 27-29)
+check_network
 measure_apt_deps
 if [ -z "${APT_NEEDED}" ]; then
   log "Toutes les dépendances système sont déjà présentes — rien à installer."
@@ -248,7 +312,7 @@ fi
 log "Versions: git $(git --version | awk '{print $3}'), ffmpeg $(ffmpeg -version | head -n1 | awk '{print $3}')"
 
 # ────────────────────────────────────────────────────────────────────────
-section "3/8 — Node.js ≥ ${NODE_MAJOR} (via nvm)"
+section "3/8 — Node.js ≥ ${NODE_MAJOR} (via nvm, fallback apt)"
 if command -v node >/dev/null 2>&1 && [ "$(node -v | sed 's/^v//' | cut -d. -f1)" -ge "${NODE_MAJOR}" ]; then
   log "Node déjà présent: $(node -v) — OK."
 else
@@ -270,16 +334,38 @@ fi
 # Met node/npm/npx sur le PATH (nvm, shell non interactif)
 export NVM_DIR="${HOME}/.nvm"
 if [ -s "${NVM_DIR}/nvm.sh" ]; then . "${NVM_DIR}/nvm.sh"; fi
+
+# AJOUT: chemin corepack npm (problème 8 — npm via corepack dans /usr/share/nodejs/corepack/shims/)
+if [ -d /usr/share/nodejs/corepack/shims ]; then
+  export PATH="/usr/share/nodejs/corepack/shims:${PATH}"
+  log "PATH enrichi avec corepack shims: /usr/share/nodejs/corepack/shims"
+fi
+
+# Fallback apt si nvm a échoué (problème 7)
+if ! command -v node >/dev/null 2>&1; then
+  log "nvm a échoué, tentative via nodesource apt..."
+  check_network
+  curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | sudo bash -
+  sudo apt-get install -y nodejs
+fi
+
 if command -v node >/dev/null 2>&1; then
   log "Node disponible: $(node -v), npm $(npm -v)."
 else
-  echo "ERREUR: node introuvable après installation nvm." >&2; exit 1
+  echo "ERREUR: node introuvable après installation nvm + fallback apt." >&2; exit 1
 fi
 
 # ────────────────────────────────────────────────────────────────────────
 section "4/8 — opencode"
 if [ -x "${HOME}/.opencode/bin/opencode" ]; then
   log "opencode déjà installé: $("${HOME}/.opencode/bin/opencode" --version) — OK."
+elif command -v opencode >/dev/null 2>&1; then
+  # Problème 10/11: opencode installé globalement mais pas dans ~/.opencode/bin/
+  log "opencode trouvé dans PATH (install global): $(opencode --version)"
+  log "Création du symlink ~/.opencode/bin/opencode → $(command -v opencode)..."
+  mkdir -p "${HOME}/.opencode/bin"
+  ln -sf "$(command -v opencode)" "${HOME}/.opencode/bin/opencode"
+  log "Symlink créé: ${HOME}/.opencode/bin/opencode"
 else
   if confirm "opencode absent — télécharger et installer (script officiel opencode.ai) ?"; then
     log "Installation via le script officiel (https://opencode.ai/install)..."
@@ -336,34 +422,34 @@ fi
 # ────────────────────────────────────────────────────────────────────────
 #  Le repo est PRIVÉ : il faut la clé SSH AVANT de pouvoir le charger.
 # ────────────────────────────────────────────────────────────────────────
-section "5/8 — Liaison GitHub (deux Deploy keys : main + repo)"
+section "5/8 — Liaison GitHub (deux Deploy keys : setup + story)"
 mkdir -p "${HOME}/.ssh"
 chmod 700 "${HOME}/.ssh"
 
-# Clé A — identité 'main' : pousse les storyboards vers openmontage_story
+# Clé A — identité 'story' : pousse les reproduction scripts vers openmontage_story
 if [ ! -f "${SSH_KEY_MAIN}" ]; then
-  if confirm "Générer la clé 'main' (${SSH_KEY_MAIN}) pour pousser les storyboards vers openmontage_story ?"; then
+  if confirm "Générer la clé 'story' (${SSH_KEY_MAIN}) pour pousser les reproduction scripts vers openmontage_story ?"; then
     ssh-keygen -t ed25519 -C "openmontage_story" -f "${SSH_KEY_MAIN}" -N "" -q
-    log "Clé 'main' générée: ${SSH_KEY_MAIN}"
+    log "Clé 'story' générée: ${SSH_KEY_MAIN}"
   else
-    echo "  ❌ La clé 'main' est nécessaire pour pousser les storyboards sur openmontage_story." >&2
+    echo "  ❌ La clé 'story' est nécessaire pour pousser les reproduction scripts sur openmontage_story." >&2
     exit 1
   fi
 else
-  log "Clé 'main' déjà présente: ${SSH_KEY_MAIN}"
+  log "Clé 'story' déjà présente: ${SSH_KEY_MAIN}"
 fi
 
-# Clé B — identité 'repo' : fetch du projet + push du setup vers main
+# Clé B — identité 'setup' : fetch du projet + push du setup vers main
 if [ ! -f "${SSH_KEY}" ]; then
-  if confirm "Générer la clé 'repo' (${SSH_KEY}) pour l'accès au projet et le push du setup vers main ?"; then
+  if confirm "Générer la clé 'setup' (${SSH_KEY}) pour l'accès au projet et le push du setup vers main ?"; then
     ssh-keygen -t ed25519 -C "openmontage_setup" -f "${SSH_KEY}" -N "" -q
-    log "Clé 'repo' générée: ${SSH_KEY}"
+    log "Clé 'setup' générée: ${SSH_KEY}"
   else
-    echo "  ❌ La clé 'repo' est nécessaire pour accéder au repo privé." >&2
+    echo "  ❌ La clé 'setup' est nécessaire pour accéder au repo privé." >&2
     exit 1
   fi
 else
-  log "Clé 'repo' déjà présente: ${SSH_KEY}"
+  log "Clé 'setup' déjà présente: ${SSH_KEY}"
 fi
 
 # Alias SSH dans ~/.ssh/config (idempotents)
@@ -387,31 +473,6 @@ ensure_alias "${GITHUB_MAIN_ALIAS}" "${SSH_KEY_MAIN}"
 ensure_alias "${GITHUB_HOST_ALIAS}" "${SSH_KEY}"
 chmod 600 "${CFG}" 2>/dev/null || true
 
-echo
-echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│  AJOUTE CES DEUX CLÉS PUBLIQUES SUR GITHUB                   │"
-echo "│  · 'openmontage'      → yakuzas2345/openmontage_setup (write) │"
-echo "│  · 'openmontage_story' → yakuzas2345/openmontage_story (write) │"
-echo "└──────────────────────────────────────────────────────────────┘"
-echo
-echo "  ➤ CLÉ 'MAIN'  (fetch + push du setup vers main) — alias openmontage"
-echo "     → repo yakuzas2345/openmontage_setup — Settings → Deploy keys"
-cat "${SSH_KEY}.pub"
-echo
-echo "  ➤ CLÉ 'MAIN'  (push des storyboards) — alias openmontage_story"
-echo "     → repo yakuzas2345/openmontage_story — Settings → Deploy keys"
-cat "${SSH_KEY_MAIN}.pub"
-echo
-echo "Attends d'avoir ajouté LES DEUX clés sur GitHub, puis appuie sur Entrée..."
-read -r
-
-# Vérification itérative des clés SSH — boucle tant que les 2 clés ne sont pas validées
-_check_ssh() {
-  local alias="$1"
-  echo "  -> ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@$alias"
-  ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@$alias 2>&1 | grep -q "successfully authenticated"
-}
-
 _display_keys() {
   echo ""
   echo "┌──────────────────────────────────────────────────────────────┐"
@@ -430,28 +491,56 @@ _display_keys() {
   echo ""
 }
 
+_display_keys
+
+# Problème 2/20: tester SSH dès que les clés existent, pas après attente utilisateur
+log "Test rapide de authentification SSH..."
+_ssh_test_ok() {
+  ssh -T -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 "git@$1" 2>&1 | grep -q "successfully authenticated"
+}
+if _ssh_test_ok "${GITHUB_HOST_ALIAS}"; then
+  log "SSH '${GITHUB_HOST_ALIAS}' déjà authentifié ✓"
+else
+  log "SSH '${GITHUB_HOST_ALIAS}' pas encore testé — vérification interactive plus bas."
+fi
+if _ssh_test_ok "${GITHUB_MAIN_ALIAS}"; then
+  log "SSH '${GITHUB_MAIN_ALIAS}' déjà authentifié ✓"
+else
+  log "SSH '${GITHUB_MAIN_ALIAS}' pas encore testé — vérification interactive plus bas."
+fi
+
+echo "Attends d'avoir ajouté LES DEUX clés sur GitHub, puis appuie sur Entrée..."
+read -r
+
+# Vérification itérative des clés SSH — boucle tant que les 2 clés ne sont pas validées
+_check_ssh() {
+  local alias="$1"
+  echo "  -> ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@$alias"
+  ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes git@$alias 2>&1 | grep -q "successfully authenticated"
+}
+
 # Boucle de vérification : affiche les clés à chaque échec et réessaie
 MAX_ATTEMPTS=30
 attempt=0
 while true; do
   setup_ok=false
   story_ok=false
-  
+
   _check_ssh "${GITHUB_HOST_ALIAS}" && setup_ok=true
   _check_ssh "${GITHUB_MAIN_ALIAS}" && story_ok=true
-  
+
   if ${setup_ok} && ${story_ok}; then
     log "SSH authentifié ✓ (${GITHUB_HOST_ALIAS} + ${GITHUB_MAIN_ALIAS})"
     break
   fi
-  
+
   attempt=$((attempt + 1))
   if [ "${attempt}" -ge "${MAX_ATTEMPTS}" ]; then
     echo "ERREUR: impossible d'authentifier les clés après ${MAX_ATTEMPTS} essais." >&2
     echo "Vérifie que les clés publiques sont bien ajoutées sur les deux repos GitHub." >&2
     exit 1
   fi
-  
+
   echo ""
   echo "⚠ Clés non encore authentifiées (essai ${attempt}/${MAX_ATTEMPTS})..."
   echo "  ${GITHUB_HOST_ALIAS} : $([ ${setup_ok} ] && echo '✓' || echo '✗')"
@@ -464,24 +553,37 @@ done
 
 # ────────────────────────────────────────────────────────────────────────
 section "6/8 — OpenMontage (initialisation git + récupération + setup)"
+# Problème 18: configurer l'identité git globalement
+git config --global user.email "yakuzas2345@gmail.com"
+git config --global user.name "yakuzas23"
+log "Identité git configurée: $(git config --global user.name) <$(git config --global user.email)>"
+
 mkdir -p "${OPENMONTAGE_DIR}"
 cd "${OPENMONTAGE_DIR}"
+
+# Problème 16: nettoyer les locks git avant toute opération
+rm -f "${OPENMONTAGE_DIR}/.git/index.lock" 2>/dev/null || true
+
 if [ -d .git ]; then
   log "Repo git déjà initialisé dans ${OPENMONTAGE_DIR} — mise à jour: git pull"
   git remote get-url origin_main >/dev/null 2>&1 \
     || git remote add origin_main "git@${GITHUB_HOST_ALIAS}:${GITHUB_REPO}"
-  git remote get-url origin_${BOOTSTRAP_BRANCH} >/dev/null 2>&1 \
-    || git remote add origin_${BOOTSTRAP_BRANCH} "git@${GITHUB_MAIN_ALIAS}:${GITHUB_STORY_REPO}"
+  # Problème 17: le nom du remote story doit correspondre exactement à la branche
+  STORY_REMOTE="origin_${BOOTSTRAP_BRANCH}"
+  git remote get-url "${STORY_REMOTE}" >/dev/null 2>&1 \
+    || git remote add "${STORY_REMOTE}" "git@${GITHUB_MAIN_ALIAS}:${GITHUB_STORY_REPO}"
   git pull --ff-only || log "pull a échoué (ignore — branche locale divergente ?)"
 else
   log "Initialisation de git dans ${OPENMONTAGE_DIR} (pas de clone) ..."
   git init -q
   git remote add origin_main "git@${GITHUB_HOST_ALIAS}:${GITHUB_REPO}"
-  git remote add origin_${BOOTSTRAP_BRANCH} "git@${GITHUB_MAIN_ALIAS}:${GITHUB_STORY_REPO}"
+  # Problème 15/17: branch naming avec _ et gestion conflit
+  STORY_REMOTE="origin_${BOOTSTRAP_BRANCH}"
+  git remote add "${STORY_REMOTE}" "git@${GITHUB_MAIN_ALIAS}:${GITHUB_STORY_REPO}"
   log "Récupération de l'historique depuis git@${GITHUB_HOST_ALIAS}:${GITHUB_REPO} ..."
   git fetch origin_main
-  git fetch origin_${BOOTSTRAP_BRANCH}
-  log "Remotes prêts : 'origin_main' (projet/setup → main) + 'origin_${BOOTSTRAP_BRANCH}' (storyboards)."
+  git fetch "${STORY_REMOTE}"
+  log "Remotes prêts : 'origin_main' (projet/setup → main) + '${STORY_REMOTE}' (reproduction scripts → ${BOOTSTRAP_BRANCH})."
 
   # Si ce script a été téléchargé DANS le futur dossier du repo, il bloquerait
   # le checkout (fichier non suivi en conflit avec la version distante).
@@ -494,16 +596,51 @@ else
     log "Script déplacé en .bootstrap/ pour libérer le checkout ..."
   fi
 
+  # Problème 15: branch naming — toujours utiliser _ (jamais -)
+  # Vérifier si la branche existe déjà sur le remote et ajouter suffixe numeric
+  _ensure_bootstrap_branch() {
+    local branch="$1"
+    # Vérifier si la branche existe localement
+    if git branch --list "${branch}" | grep -q "${branch}"; then
+      log "Branche locale '${branch}' existe déjà."
+      return 0
+    fi
+    # Vérifier si la branche existe sur le remote
+    if git ls-remote --heads "${STORY_REMOTE}" "${branch}" 2>/dev/null | grep -q "${branch}"; then
+      log "Branche远程 '${branch}' existe — création locale."
+      git checkout -b "${branch}" "${STORY_REMOTE}/${branch}" 2>/dev/null && return 0
+    fi
+    # Créer la branche à partir de origin_main/main
+    git checkout -b "${branch}" origin_main/main 2>&1
+  }
+
   # Nouvelle branche locale (JAMAIS 'main') issue de origin_main/main
+  # Gérer les conflits de noms de branche (problème 15)
   if ! git checkout -b "${BOOTSTRAP_BRANCH}" origin_main/main 2>&1; then
     log "Branche '${BOOTSTRAP_BRANCH}' déjà présente — checkout direct."
     if ! git checkout "${BOOTSTRAP_BRANCH}" 2>&1; then
-      echo "ERREUR: récupération de la branche '${BOOTSTRAP_BRANCH}' impossible" >&2
-      echo "  — un fichier non suivi bloque probablement le checkout." >&2
-      echo "  Libère le dossier puis relance." >&2
-      exit 1
+      # Essayer avec suffixe numeric (problème 15)
+      local_suffix=2
+      while [ "${local_suffix}" -lt 100 ]; do
+        alt_branch="${BOOTSTRAP_BRANCH}_${local_suffix}"
+        if git checkout -b "${alt_branch}" origin_main/main 2>/dev/null; then
+          log "Conflit résolu — création de la branche '${alt_branch}' (suffixe ${local_suffix})."
+          BOOTSTRAP_BRANCH="${alt_branch}"
+          STORY_REMOTE="origin_${BOOTSTRAP_BRANCH}"
+          # Mettre à jour le remote story
+          git remote set-url "${STORY_REMOTE}" "git@${GITHUB_MAIN_ALIAS}:${GITHUB_STORY_REPO}" 2>/dev/null || \
+            git remote add "${STORY_REMOTE}" "git@${GITHUB_MAIN_ALIAS}:${GITHUB_STORY_REPO}"
+          break
+        fi
+        local_suffix=$((local_suffix + 1))
+      done
+      if [ "${local_suffix}" -ge 100 ]; then
+        echo "ERREUR: impossible de créer la branche bootstrap après 100 tentatives." >&2
+        exit 1
+      fi
     fi
   fi
+
   rm -f "${OPENMONTAGE_DIR}/.bootstrap/setup_ubuntu.sh.running"
   log "Branche locale '${BOOTSTRAP_BRANCH}' (issue de origin_main/main): $(git log --oneline -1)"
   # Branche locale 'main' = miroir du main distant du projet (commits de setup)
@@ -514,13 +651,25 @@ else
     || log "Upstream setup '${BOOTSTRAP_BRANCH}' pas encore créé — premier push le créera."
 fi
 
-if [ ! -d .venv ]; then
+# Problème 24: deps Python supplémentaires (pillow, numpy, imageio)
+if [ -d .venv ]; then
+  # shellcheck disable=SC1091
+  . .venv/bin/activate
+  python -V
+  # Installer les deps manquantes pour la génération vidéo
+  if ! python -c "from PIL import Image" >/dev/null 2>&1; then
+    log "Installation de pillow, numpy, imageio dans le venv..."
+    pip install --quiet pillow numpy imageio imageio-ffmpeg
+  fi
+else
   log "Création du venv (.venv)..."
   python3 -m venv .venv
+  # shellcheck disable=SC1091
+  . .venv/bin/activate
+  python -V
+  log "Installation de pillow, numpy, imageio..."
+  pip install --quiet pillow numpy imageio imageio-ffmpeg
 fi
-# shellcheck disable=SC1091
-. .venv/bin/activate
-python -V
 
 if confirm "Lancer 'make setup' (télécharge deps Python, Remotion, Piper TTS, HyperFrames) ?"; then
   log "make setup ..."
@@ -559,10 +708,23 @@ else
   log ".env créé depuis .env.example"
   echo "  ⚠ Ajoute tes clés API dans ${OPENMONTAGE_DIR}/.env : AGNES_API_KEY,"
   echo "    COLOSSYAN_API_KEY, FREESOUND_API_KEY, PEXELS_API_KEY, etc."
+  # Problème 19: vérifier que AGNES_API_KEY est présente
+  if ! grep -q "^AGNES_API_KEY=" "${OPENMONTAGE_DIR}/.env" 2>/dev/null || \
+     grep -q "^AGNES_API_KEY=$" "${OPENMONTAGE_DIR}/.env" 2>/dev/null; then
+    echo "  ⚠ ATTENTION: AGNES_API_KEY est vide dans .env !" >&2
+    echo "     sans clé, la génération vidéo ne fonctionnera pas." >&2
+  fi
 fi
 
 # ────────────────────────────────────────────────────────────────────────
 section "8/8 — Vérification finale des dépendances"
+# Problème 13: s'assurer que /usr/local/bin est dans le PATH
+export PATH="/usr/local/bin:${HOME}/.opencode/bin:${PATH}"
+# Problème 8: s'assurer que corepack shims est dans le PATH
+if [ -d /usr/share/nodejs/corepack/shims ]; then
+  export PATH="/usr/share/nodejs/corepack/shims:${PATH}"
+fi
+
 # shellcheck disable=SC2317
 report_runtime_gaps
 if [ -z "${GAPS}" ]; then
@@ -577,15 +739,16 @@ command -v ffmpeg >/dev/null && log "ffmpeg   : $(ffmpeg -version | head -n1 | a
 command -v node  >/dev/null && log "node     : $(node -v)"
 command -v npm   >/dev/null && log "npm      : $(npm -v)"
 command -v python3 >/dev/null && log "python3  : $(python3 -V | awk '{print $2}')"
+command -v opencode >/dev/null && log "opencode : $(opencode --version)"
 
 # ────────────────────────────────────────────────────────────────────────
 section "Terminé ✓"
-echo "  Repo      : ${OPENMONTAGE_DIR}"
-echo "  Branche   : $(git -C "${OPENMONTAGE_DIR}" symbolic-ref --short HEAD) (upstream: $(git -C "${OPENMONTAGE_DIR}" rev-parse --abbrev-ref '@{upstream}'))"
-echo "  SSH       : git@${GITHUB_HOST_ALIAS} (openmontage_setup: projet/setup) + git@${GITHUB_MAIN_ALIAS} (openmontage_story: storyboards)"
-echo "  Node      : $(node -v) / npm $(npm -v)"
-echo "  Python    : $("${OPENMONTAGE_DIR}/.venv/bin/python" -V)"
-echo "  opencode  : $("${HOME}/.opencode/bin/opencode" --version)"
+echo "  Repo       : ${OPENMONTAGE_DIR}"
+echo "  Branche    : $(git -C "${OPENMONTAGE_DIR}" symbolic-ref --short HEAD) (upstream: $(git -C "${OPENMONTAGE_DIR}" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || echo '(none)'))"
+echo "  SSH        : git@${GITHUB_HOST_ALIAS} (openmontage_setup: projet/setup) + git@${GITHUB_MAIN_ALIAS} (openmontage_story: reproduction scripts)"
+echo "  Node       : $(node -v) / npm $(npm -v)"
+echo "  Python     : $("${OPENMONTAGE_DIR}/.venv/bin/python" -V 2>/dev/null || echo 'N/A')"
+echo "  opencode   : $(opencode --version 2>/dev/null || echo 'N/A')"
 echo
 echo "Pour lancer opencode dans le projet :"
 echo "  cd ${OPENMONTAGE_DIR} && opencode"
@@ -603,12 +766,13 @@ proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash /tmp/setup_ubuntu_p
 rm -f "${ROOTFS}/tmp/setup_ubuntu_pr.sh"
 fi
 
+# Problème 12/13: aliases corrigés pour les deux environnements
 if grep -q "alias openmontage=" "${HOME}/.bashrc" 2>/dev/null; then
     STEP6="done"
 else
 step "6/6 — Alias openmontage (Termux + Ubuntu)"
 
-# Alias au niveau Termux
+# Alias au niveau Termux (corrigé — utilise le bon chemin)
 TERMUX_BASHRC="${HOME}/.bashrc"
 if grep -q "alias openmontage=" "${TERMUX_BASHRC}" 2>/dev/null; then
     echo "  ~/.bashrc (Termux) : alias openmontage déjà présent — inchangé."
@@ -617,12 +781,13 @@ else
 
 # openmontage — ajout automatique par setup_termux
 alias ${USER_NAME}="proot-distro login ${DISTRO} --user ${USER_NAME}"
-alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c ' cd /home/${USER_NAME}/openmontage && /home/${USER_NAME}/.opencode/bin/opencode ; bash'"
+alias openmontage="proot-distro login ${DISTRO} --user ${USER_NAME} -- bash -c 'cd /home/${USER_NAME}/openmontage && opencode ; bash'"
 EOF
     echo "  Alias '${USER_NAME}' et 'openmontage' ajoutés dans ~/.bashrc (Termux)."
 fi
 
 # Alias au niveau de l'utilisateur Ubuntu dans le conteneur
+# Problème 13: inclure /usr/local/bin dans PATH
 UB_BASHRC="${ROOTFS}/home/${USER_NAME}/.bashrc"
 if grep -q "alias openmontage=" "${UB_BASHRC}" 2>/dev/null; then
     echo "  ~/.bashrc (${USER_NAME}@${DISTRO}) : alias openmontage déjà présent — inchangé."
@@ -630,7 +795,7 @@ else
     cat >> "${UB_BASHRC}" <<'UB_EOF'
 
 # openmontage — ajout automatique par setup_termux
-export PATH="$HOME/.opencode/bin:$PATH"
+export PATH="/usr/local/bin:$HOME/.opencode/bin:$PATH"
 alias openmontage='cd ~/openmontage && opencode'
 UB_EOF
     echo "  Alias 'openmontage' ajouté dans ~/.bashrc de ${USER_NAME}@${DISTRO}."
@@ -654,7 +819,7 @@ EOF
 echo "==> Ouverture du shell Ubuntu de '${USER_NAME}', lancement d'opencode..."
 echo "    (opencode s'ouvre dans ~/openmontage, prêt pour ton script de génération)"
 proot-distro login "${DISTRO}" --user "${USER_NAME}" -- bash -c '
-    export PATH="$HOME/.opencode/bin:$PATH"
+    export PATH="/usr/local/bin:$HOME/.opencode/bin:$PATH"
     cd ~/openmontage && opencode ; bash
 '
 fi
