@@ -134,17 +134,31 @@ if proot-distro login "${DISTRO}" -- id "${USER_NAME}" >/dev/null 2>&1; then
     STEP4="done"
 else
 step "4/6 — Utilisateur avec sudo (NOPASSWD)"
-# Utilisateurs humains du conteneur (uid >= 1000, hors nobody), lus dans son /etc/passwd.
-# Tout passe par stdin (jamais /dev/tty) : `select` et `read` lisent stdin.
+# Comptes HUMAINS avec sudo : membres du groupe sudo (ou entrée sudoers.d),
+# uid >= 1000, hors nobody. Lu direct dans le rootfs (pas de login proot).
 _list_container_users() {
-  awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' "${ROOTFS}/etc/passwd" 2>/dev/null || true
+  local _u _x _uid _rest _members
+  _members="$(awk -F: '$1=="sudo" {print $4}' "${ROOTFS}/etc/group" 2>/dev/null || true)"
+  while IFS=: read -r _u _x _uid _rest; do
+    case "${_uid}" in ''|*[!0-9]*) continue ;; esac
+    if [ "${_uid}" -ge 1000 ] && [ "${_uid}" != 65534 ]; then
+      if [ -f "${ROOTFS}/etc/sudoers.d/${_u}" ]; then
+        printf '%s\n' "${_u}"
+      else
+        case ",${_members}," in
+          *",${_u},"*) printf '%s\n' "${_u}" ;;
+        esac
+      fi
+    fi
+  done < "${ROOTFS}/etc/passwd" 2>/dev/null || true
 }
 if [ -t 0 ]; then
   echo ""
-  echo "  ┌──────────────────────────────────────────────────┐"
-  echo "  │  COMPTE UBUNTU — choisis un numéro                │"
-  echo "  │  (Ctrl+C pour abandonner)                         │"
-  echo "  └──────────────────────────────────────────────────┘"
+  echo "  ┌───────────────────────────────────────────────────────────────┐"
+  echo "  │  Choisissez le numéro d'un compte ou créez un nouveau compte  │"
+  echo "  │  (seuls les comptes sudo sont affichés, Ctrl+C pour abandonner) │"
+  echo "  └───────────────────────────────────────────────────────────────┘"
+  # Tout passe par stdin (jamais /dev/tty) : `select` et `read` lisent stdin.
   _menu=()
   while IFS= read -r _u; do [ -n "${_u}" ] && _menu+=("${_u}"); done < <(_list_container_users)
   _menu+=("Créer un nouvel utilisateur")
