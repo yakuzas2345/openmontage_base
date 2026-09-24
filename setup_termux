@@ -1017,30 +1017,23 @@ _write_global_block() {
     log "Bloc global déjà présent dans ${target} — nettoyé."
   fi
   cat >> "${target}" <<'OMGLOBALBLOCK'
-# === OPENMONTAGE GLOBAL AVAILABILITY — setup_ubuntu.sh ===
-export OPENMONTAGE_ROOT="${OPENMONTAGE_DIR:-${HOME}/OpenMontage}"
-if [ -f "$OPENMONTAGE_ROOT/.env" ]; then
-  set -a
-  . "$OPENMONTAGE_ROOT/.env"
-  set +a
-fi
 om() {
-  local root="${OPENMONTAGE_ROOT:-${HOME}/OpenMontage}"
+  local root="${OPENMONTAGE_ROOT:-$HOME/OpenMontage}"
   local py="$root/.venv/bin/python"
   case "${1:-}" in
     ""|-h|--help|help)
       echo "Usage: om {py|make|preflight|root|key <KEY=VALUE>|clear-keys}"
       echo "  om py      — lance python du venv OpenMontage (PYTHONPATH auto)"
-      echo "  om make    — make -C \$OPENMONTAGE_ROOT <cible>"
+      echo "  om make    — make -C \\$OPENMONTAGE_ROOT <cible>"
       echo "  om preflight — registry provider_menu_summary()"
-      echo "  om root    — cd \$OPENMONTAGE_ROOT"
-      echo "  om key     — ajoute/supprime une clé dans \$OPENMONTAGE_ROOT/.env ET l'exporte"
+      echo "  om root    — cd \\$OPENMONTAGE_ROOT"
+      echo "  om key     — ajoute/supprime une clé dans \\$OPENMONTAGE_ROOT/.env ET l'exporte"
       return 0 ;;
     root) cd "$root" ;;
     make) shift; make -C "$root" "$@" ;;
     preflight) PYTHONPATH="$root" "$py" -c "from tools.tool_registry import registry; import json; registry.discover(); print(json.dumps(registry.provider_menu_summary(), indent=2))" ;;
     key)
-      if [ $# -eq 0 ]; then
+      if [ "$#" -lt 2 ]; then
         echo "=== Clés actives dans .env ==="
         while IFS= read -r l; do
           [[ -z "$l" || "$l" == \#* ]] && continue
@@ -1049,12 +1042,16 @@ om() {
         done < <(grep -E "^[A-Z_]+=.+" "$root/.env" 2>/dev/null)
         return 0
       fi
-      local assignment="$1" kval val
-      kval="${assignment%%=*}"; val="${assignment#*=}"
+      local assignment="$2" kval val
+      if [[ "$assignment" == *=* ]]; then
+        kval="${assignment%%=*}"; val="${assignment#*=}"
+      else
+        kval="$assignment"; val=""
+      fi
       if [ -z "$val" ]; then
         sed -i "/^${kval}=/d" "$root/.env"
         unset "$kval"
-        log "Clé $kval supprimée de .env et du shell"
+        echo "Clé $kval supprimée de .env et du shell"
       else
         if grep -qE "^${kval}=" "$root/.env" 2>/dev/null; then
           sed -i "s|^${kval}=.*|${kval}=${val}|" "$root/.env"
@@ -1062,14 +1059,13 @@ om() {
           echo "${kval}=${val}" >> "$root/.env"
         fi
         export "${kval}=${val}"
-        log "Clé $kval écrite dans .env et exportée"
+        echo "Clé $kval écrite dans .env et exportée"
       fi
       return 0 ;;
     py) shift; PYTHONPATH="${root}${PYTHONPATH:+:$PYTHONPATH}" "$py" "$@" ;;
-    *) echo "om: sous-commande inconnue '$1' (om help)"; return 1 ;;
+    *) echo "om: sous-commande inconnue '\$1' (om help)"; return 1 ;;
   esac
 }
-# === FIN OPENMONTAGE GLOBAL AVAILABILITY ===
 OMGLOBALBLOCK
   log "Bloc global écrit dans ${target}."
 }
