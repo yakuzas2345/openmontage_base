@@ -203,11 +203,13 @@ fi
 export PATH="${HOME}/.opencode/bin:${PATH}"
 opencode --version
 
-# Configuration opencode (provider Agnes, identique à la machine source)
+# Configuration opencode (providers multiples, global par défaut)
+# Politique : tout provider ajouté reste actif quelque soit le dossier d'où on lance opencode.
 OPTCFG="${HOME}/.config/opencode/opencode.jsonc"
-if [ ! -f "${OPTCFG}" ]; then
-  mkdir -p "${HOME}/.config/opencode"
-  cat > "${OPTCFG}" <<'JSON'
+mkdir -p "${HOME}/.config/opencode"
+write_opencode_cfg() {
+  local f="$1"
+  cat > "${f}" <<'JSON'
 {
   "$schema": "https://opencode.ai/config.json",
   "provider": {
@@ -235,13 +237,42 @@ if [ ! -f "${OPTCFG}" ]; then
           "tool_call": true
         }
       }
+    },
+    "google": {
+      "npm": "@ai-sdk/google",
+      "name": "Google Gemini",
+      "options": {
+        "apiKey": "{env:GEMINI_API_KEY}"
+      },
+      "models": {
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash (chat raisonnement quotidien)",
+          "tool_call": true,
+          "temperature": true,
+          "limit": { "context": 1048576, "output": 65536 }
+        },
+        "gemini-3-flash-preview": {
+          "name": "Gemini 3 Flash Preview (raisonnement fort)",
+          "tool_call": true,
+          "temperature": true,
+          "limit": { "context": 1048576, "output": 65536 }
+        }
+      }
     }
   }
 }
 JSON
-  log "Config opencode écrite: ${OPTCFG}"
+  log "Config opencode écrite (agnes + google): ${f}"
+}
+if [ -f "${OPTCFG}" ]; then
+  if ! grep -q '"agnes"' "${OPTCFG}" || ! grep -q '"google"' "${OPTCFG}"; then
+    log "Config opencode incomplète — régénération."
+    write_opencode_cfg "${OPTCFG}"
+  else
+    log "Config opencode complète (agnes + google): ${OPTCFG} — inchangée."
+  fi
 else
-  log "Config opencode déjà présente: ${OPTCFG} — inchangée."
+  write_opencode_cfg "${OPTCFG}"
 fi
 
 # ────────────────────────────────────────────────────────────────────────
@@ -490,6 +521,91 @@ command -v npm   >/dev/null && log "npm      : $(npm -v)"
 command -v python3 >/dev/null && log "python3  : $(python3 -V | awk '{print $2}')"
 
 # ────────────────────────────────────────────────────────────────────────
+
+# ────────────────────────────────────────────────────────────────────────
+section "9/8 — Disponibilité globale (om + dotenv + opencode config)"
+# Politique : toute clé ajoutée (export, .env, opencode config) reste accessible
+# depuis n'importe quel dossier. Le bloc est idempotent (marker-based).
+# Modification future ? Édite ~/.bashrc / ~/.profile ou relance le script.
+
+_GLOBAL_MARKER="# === OPENMONTAGE GLOBAL AVAILABILITY — setup_ubuntu.sh"
+
+_write_global_block() {
+  local target="$1"
+  if grep -qF "$(_GLOBAL_MARKER)" "${target}" 2>/dev/null; then
+    local tmp="${target}.om-tmp"
+    awk -v mark="$(_GLOBAL_MARKER)" '
+      /^# === OPENMONTAGE GLOBAL AVAILABILITY/ { skip=1 }
+      skip && /^# === FIN OPENMONTAGE GLOBAL AVAILABILITY/ { skip=0; print; next }
+      !skip { print }
+    ' "${target}" > "${tmp}" && mv "${tmp}" "${target}"
+    log "Bloc global déjà présent dans ${target} — nettoyé."
+  fi
+  cat >> "${target}" <<'OMGLOBALBLOCK'
+# === OPENMONTAGE GLOBAL AVAILABILITY — setup_ubuntu.sh ===
+export OPENMONTAGE_ROOT="${OPENMONTAGE_DIR:-${HOME}/OpenMontage}"
+if [ -f "$OPENMONTAGE_ROOT/.env" ]; then
+  set -a
+  . "$OPENMONTAGE_ROOT/.env"
+  set +a
+fi
+om() {
+  local root="${OPENMONTAGE_ROOT:-${HOME}/OpenMontage}"
+  local py="$root/.venv/bin/python"
+  case "${1:-}" in
+    ""|-h|--help|help)
+      echo "Usage: om {py|make|preflight|root|key <KEY=VALUE>|clear-keys}"
+      echo "  om py      — lance python du venv OpenMontage (PYTHONPATH auto)"
+      echo "  om make    — make -C \$OPENMONTAGE_ROOT <cible>"
+      echo "  om preflight — registry provider_menu_summary()"
+      echo "  om root    — cd \$OPENMONTAGE_ROOT"
+      echo "  om key     — ajoute/supprime une clé dans \$OPENMONTAGE_ROOT/.env ET l'exporte"
+      return 0 ;;
+    root) cd "$root" ;;
+    make) shift; make -C "$root" "$@" ;;
+    preflight) PYTHONPATH="$root" "$py" -c "from tools.tool_registry import registry; import json; registry.discover(); print(json.dumps(registry.provider_menu_summary(), indent=2))" ;;
+    key)
+      if [ $# -eq 0 ]; then
+        echo "=== Clés actives dans .env ==="
+        while IFS= read -r l; do
+          [[ -z "$l" || "$l" == \#* ]] && continue
+          k="${l%%=*}"
+          printf '  %-30s len=%d\n' "$k" "${#l}"
+        done < <(grep -E "^[A-Z_]+=.+" "$root/.env" 2>/dev/null)
+        return 0
+      fi
+      local assignment="$1" kval val
+      kval="${assignment%%=*}"; val="${assignment#*=}"
+      if [ -z "$val" ]; then
+        sed -i "/^${kval}=/d" "$root/.env"
+        unset "$kval"
+        log "Clé $kval supprimée de .env et du shell"
+      else
+        if grep -qE "^${kval}=" "$root/.env" 2>/dev/null; then
+          sed -i "s|^${kval}=.*|${kval}=${val}|" "$root/.env"
+        else
+          echo "${kval}=${val}" >> "$root/.env"
+        fi
+        export "${kval}=${val}"
+        log "Clé $kval écrite dans .env et exportée"
+      fi
+      return 0 ;;
+    py) shift; PYTHONPATH="${root}${PYTHONPATH:+:$PYTHONPATH}" "$py" "$@" ;;
+    *) echo "om: sous-commande inconnue '$1' (om help)"; return 1 ;;
+  esac
+}
+# === FIN OPENMONTAGE GLOBAL AVAILABILITY ===
+OMGLOBALBLOCK
+  log "Bloc global écrit dans ${target}."
+}
+
+_write_global_block "${HOME}/.bashrc"
+_write_global_block "${HOME}/.profile"
+
+# Sourcing immédiat dans le shell en cours
+[ -f "${HOME}/.bashrc" ] && . "${HOME}/.bashrc" 2>/dev/null || true
+[ -f "${HOME}/.profile" ] && . "${HOME}/.profile" 2>/dev/null || true
+log "Disponibilité globale active : om() + dotenv + opencode config."
 section "Terminé ✓"
 echo "  Repo      : ${OPENMONTAGE_DIR}"
 echo "  Branche   : $(git -C "${OPENMONTAGE_DIR}" symbolic-ref --short HEAD) (upstream: $(git -C "${OPENMONTAGE_DIR}" rev-parse --abbrev-ref '@{upstream}'))"
@@ -498,7 +614,12 @@ echo "  Node      : $(node -v) / npm $(npm -v)"
 echo "  Python    : $("${OPENMONTAGE_DIR}/.venv/bin/python" -V)"
 echo "  opencode  : $("${HOME}/.opencode/bin/opencode" --version)"
 echo
-echo "Pour lancer opencode dans le projet :"
+echo "Pour lancer opencode dans le projet (depuis N'IMPORTE OÙ) :"'
+echo "  om root              → cd ~/OpenMontage"
+echo "  om py script.py      → venv + imports auto"
+echo "  om preflight         → capabilities registry"
+echo "  om key KEY=value     → ajoute une clé (globale)"
+echo "  om key KEY           → supprime une clé (globale)"
 echo "  cd ${OPENMONTAGE_DIR} && opencode"
 echo
 echo "Garde tes secrets hors de tout commit — .env est gitignoré."
