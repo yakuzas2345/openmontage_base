@@ -102,6 +102,10 @@ pkg upgrade -y
 # coreutils (sleep/yes/...) absent du bootstrap minimal — requis dès l'étape 2 (sleep 2)
 # lesspipe : filtre d'entrée pour less (sinon "program lesspipe is not installed" en sortie)
 pkg install -y coreutils lesspipe
+# termux-api : CLI des notifications Android (termux-notification --sound).
+# L'app compagnon Termux:API doit aussi être installée (voir étape 7/6) —
+# sans elle, le CLI est présent mais muet.
+pkg install -y termux-api
 STEP1="done"
 if [ -d "${HOME}/storage/shared/openmontage" ]; then
     STEP2="done"
@@ -1136,6 +1140,86 @@ echo "==> Mode non-interactif : shell interactif ignoré (stdin n'est pas un TTY
 echo "    Pour ouvrir opencode : proot-distro login ${DISTRO} --user ${USER_NAME}"
 fi
 STEP6="done"
+
+# ────────────────────────────────────────────────────────────────────────
+#  7/6 — Notifications téléphone (1 réponse opencode = 1 notif + son)
+#  Idempotent : réécrit les fichiers et relance le watcher à chaque run.
+#  Requiert l'app compagnon Termux:API (impossible à installer depuis
+#  Termux lui-même) : F-Droid "Termux:API", ou APK GitHub
+#  https://github.com/termux/termux-api/releases, ou depuis un PC :
+#  adb install termux-api.apk — même signature que l'app Termux requise.
+# ────────────────────────────────────────────────────────────────────────
+step "7/6 — Notifications téléphone (Termux:API + om-notify)"
+# 7a. Plugin opencode global (côté conteneur) : session.idle +
+#     permission.asked → fichier trigger sur le home Termux partagé.
+if [ -d "${ROOTFS}/home/${USER_NAME}" ]; then
+  mkdir -p "${ROOTFS}/home/${USER_NAME}/.config/opencode/plugins"
+  cat > "${ROOTFS}/home/${USER_NAME}/.config/opencode/plugins/om-notify.js" <<'OM_PLUGIN_EOF'
+// om-notify.js — OpenMontage phone notifier (global opencode plugin).
+// Fires on session.idle (response complete) and permission.asked.
+// Runs INSIDE the PRoot container: it only drops a trigger file on the
+// shared Termux home (bound into the container). A Termux-side watcher
+// (om-notify-watch.sh) turns the trigger into a real Android notification
+// with sound via Termux:API. Never throws: hooks must not break sessions.
+export const OmNotifyPlugin = async ({ $ }) => {
+  return {
+    event: async ({ event }) => {
+      try {
+        const trigger = "/data/data/com.termux/files/home/.om_notify_trigger";
+        if (event && event.type === "session.idle") {
+          await $`echo idle > ${trigger}`;
+        } else if (event && event.type === "permission.asked") {
+          await $`echo permission > ${trigger}`;
+        }
+      } catch {
+        // Swallow: notification must never break a session.
+      }
+    },
+  };
+};
+OM_PLUGIN_EOF
+  log "Plugin opencode om-notify.js déployé (conteneur ${USER_NAME})."
+else
+  log "Conteneur absent — plugin om-notify.js skippé (relance après étape 3-5)."
+fi
+# 7b. Watcher côté Termux : trigger → termux-notification --sound.
+cat > "${HOME}/om-notify-watch.sh" <<'OM_WATCH_EOF'
+#!/data/data/com.termux/files/usr/bin/bash
+# om-notify-watch.sh — Termux-side watcher for opencode phone notifications.
+# The opencode plugin (om-notify.js, running in PRoot) drops a trigger file;
+# this loop turns it into an Android notification with sound (Termux:API).
+# Run once: nohup bash ~/om-notify-watch.sh > ~/.om-notify-watch.log 2>&1 &
+TRIG="/data/data/com.termux/files/home/.om_notify_trigger"
+while true; do
+  if [ -f "${TRIG}" ]; then
+    KIND="$(cat "${TRIG}" 2>/dev/null)"
+    rm -f "${TRIG}"
+    if [ "${KIND}" = "permission" ]; then
+      termux-notification --id om-phone --title "OpenMontage" \
+        --content "Action requise dans Termux" --sound --vibrate 500,200,500 2>/dev/null
+    else
+      termux-notification --id om-phone --title "OpenMontage" \
+        --content "Reponse prete" --sound 2>/dev/null
+    fi
+  fi
+  sleep 2
+done
+OM_WATCH_EOF
+chmod +x "${HOME}/om-notify-watch.sh"
+pkill -f om-notify-watch.sh 2>/dev/null || true
+sleep 1
+nohup bash "${HOME}/om-notify-watch.sh" > "${HOME}/.om-notify-watch.log" 2>&1 &
+log "Watcher om-notify-watch.sh (re)lancé (pid $!)."
+# 7c. Test présence app compagnon Termux:API.
+if termux-notification --id om-setup-test --title "OpenMontage setup" \
+    --content "Notifications OK" --sound >/dev/null 2>&1; then
+  log "Termux:API répond ✓ (si rien ne s'affiche : autorise les notifications de l'app Termux:API dans Réglages Android)."
+else
+  echo "  ⚠ App compagnon Termux:API absente — notifications téléphone inactives." >&2
+  echo "    Installe-la (F-Droid : Termux:API, ou APK :" >&2
+  echo "    https://github.com/termux/termux-api/releases :" >&2
+  echo "    depuis un PC : adb install termux-api.apk), puis relance : bash ~/setup_termux" >&2
+fi
 
 # Sauvegarder l'état pour reprise ultérieure
 cat > "${HOME}/.openmontage_resume_state" << EOF
