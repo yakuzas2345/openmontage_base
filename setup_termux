@@ -31,6 +31,7 @@ set -e
 # --- Helpers ---
 step() { echo; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; echo "▶ $1"; echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"; }
 log()  { echo "  · $1"; }
+section() { step "$@"; }  # alias: le bloc 9/8 + fin utilise section(), défini seulement côté conteneur
 
 # --- Nom de l'utilisateur : détection automatique ---
 USER_NAME="${USER:-}"
