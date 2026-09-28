@@ -1255,6 +1255,48 @@ fi
 # « Ne pas afficher dans le launcher » (Android 16 sur Samsung Galaxy Tab S9 FE+).
 log "Masquage icône : `pm disable-user` inaccessible en shell sans root —"
 log "    ouvrir manuellement Réglages → Termux:API / Termux:Boot → « Ne pas afficher dans le launcher »."
+# 7e. Réparation symlink npx/node/npm — le setup laisse `/usr/local/bin/npx`
+#     vers `/npx` (brisé). Le vrai binaire node/npx est dans le chemin nvm de
+#     l'utilisateur, et le conteneur PRoot le voit. On recrée les liens
+#     absolus dans le rootfs `/usr/local/bin/`. Idempotent.
+NODE_BIN="${HOME}/.nvm/versions/node/$(ls "${HOME}/.nvm/versions/node/" 2>/dev/null | sort -V | tail -n1)/bin"
+if [ -x "${NODE_BIN}/node" ] && [ -x "${NODE_BIN}/npx" ]; then
+  if [ ! -L "/usr/local/bin/npx" ] || ! /usr/local/bin/npx --version >/dev/null 2>&1; then
+    rm -f /usr/local/bin/node /usr/local/bin/npm /usr/local/bin/npx
+    ln -sf "${NODE_BIN}/node" /usr/local/bin/node
+    ln -sf "${NODE_BIN}/npm"  /usr/local/bin/npm
+    ln -sf "${NODE_BIN}/npx"  /usr/local/bin/npx
+    log "npx/npm/node réparés vers ${NODE_BIN}."
+  else
+    log "npx/npm/node déjà corrects."
+  fi
+else
+  echo "  ⚠ NVM node-bin introuvable (${NODE_BIN}) — Remotion/HyperFrames risquent de échouer au premier appel." >&2
+fi
+
+# 7f. Auto-warm cache Chrome pour Remotion (~88 Mo) + vérif runtime HyperFrames
+step "7f — Auto-warm Remotion + vérif HyperFrames"
+REMOTION_DIR="${HOME}/openmontage/remotion-composer"
+if [ -d "${REMOTION_DIR}" ] && command -v npx >/dev/null 2>&1; then
+  ( cd "${REMOTION_DIR}" && npx remotion browser ensure >/dev/null 2>&1 \
+      && log "Remotion browser warmed ✓." \
+      || echo "  ⚠ Remotion browser ensure a échoué — le premier render patientera le téléchargement (~88 Mo)." >&2 )
+elif ! command -v npx >/dev/null 2>&1; then
+  log "npx absent — skip Remotion warm (corriger 7e avant de relancer)."
+else
+  log "remotion-composer introuvable — skip auto-warm (relance après make setup)."
+fi
+HF_CHECK="${HOME}/openmontage"
+if [ -d "${HF_CHECK}/.venv" ]; then
+  echo "    Runtime checks (post-setup) :"
+  ( cd "${HF_CHECK}" && ./.venv/bin/python -c "
+import json, sys
+sys.path.insert(0, '.')
+from tools.video.video_compose import VideoCompose
+print(json.dumps(VideoCompose().get_info().get('render_engines'), indent=4))
+" 2>/dev/null | sed 's/^/    /' )
+fi
+
 
 # Sauvegarder l'état pour reprise ultérieure
 cat > "${HOME}/.openmontage_resume_state" << EOF
