@@ -1220,6 +1220,41 @@ else
   echo "    https://github.com/termux/termux-api/releases :" >&2
   echo "    depuis un PC : adb install termux-api.apk), puis relance : bash ~/setup_termux" >&2
 fi
+# 7d. Survie au reboot : script d'entrée Termux:Boot (relance le watcher au
+#     démarrage, même si l'app Termux est fermée). Termux:Boot est une
+#     app compagnon optionnelle — installer en ADB si elle manque.
+BOOT_ENTRY_DIR="${HOME}/.termux/boot"
+BOOT_ENTRY_PATH="${BOOT_ENTRY_DIR}/00-om-notify"
+mkdir -p "${BOOT_ENTRY_DIR}"
+cat > "${BOOT_ENTRY_PATH}" <<'BOOT_ENTRY_EOF'
+#!/data/data/com.termux/files/usr/bin/sh
+# om-boot-notify.sh — relance le watcher om-notify au boot (installé par setup_termux 7/6).
+export PREFIX=/data/data/com.termux/files/usr
+export PATH=/data/data/com.termux/files/usr/bin:/system/bin
+LOG="/data/data/com.termux/files/home/.om-notify-boot.log"
+echo "$(date -u +%FT%TZ) boot: starting om-notify watcher" >> "${LOG}"
+pkill -f om-notify-watch.sh 2>/dev/null || true
+sleep 1
+nohup bash /data/data/com.termux/files/home/om-notify-watch.sh >> "${LOG}" 2>&1 &
+echo "$(date -u +%FT%TZ) boot: watcher pid $!" >> "${LOG}"
+BOOT_ENTRY_EOF
+chmod +x "${BOOT_ENTRY_PATH}"
+log "Script boot Termux:Boot installé (${BOOT_ENTRY_PATH})."
+APP_BOOT="com.termux.boot"
+if pm list packages 2>&1 | grep -qF "package:${APP_BOOT}"; then
+  log "Termux:Boot installé et actif — le watcher se relancera au prochain reboot."
+else
+  echo "  ⚠ App compagnon Termux:Boot absente — le watcher ne survivra pas au reboot." >&2
+  echo "    Installe-la (F-Droid : Termux:Boot, ou APK :" >&2
+  echo "    https://github.com/termux/termux-boot/releases :" >&2
+  echo "    depuis un PC : adb install termux-boot.apk), puis relance : bash ~/setup_termux" >&2
+fi
+# Masquage des icônes companions (Termux:API / Termux:Boot).
+# `pm disable-user --user 0 <component>` refuse sans root (SecurityException).
+# Solution : ouvrir manuellement Réglages → Termux:API/Termux:Boot →
+# « Ne pas afficher dans le launcher » (Android 16 sur Samsung Galaxy Tab S9 FE+).
+log "Masquage icône : `pm disable-user` inaccessible en shell sans root —"
+log "    ouvrir manuellement Réglages → Termux:API / Termux:Boot → « Ne pas afficher dans le launcher »."
 
 # Sauvegarder l'état pour reprise ultérieure
 cat > "${HOME}/.openmontage_resume_state" << EOF
